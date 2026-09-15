@@ -24,6 +24,26 @@ describe('llm/errors · classifyLlmError', () => {
     expect(info.kind).toBe('model')
   })
 
+  it('★ 内容审核拦截（千问 data_inspection_failed 现场报文）→ content，文案给行动指引', () => {
+    // 真实 fixture：owner 2026-09-15 实测，长技术清单会话被 DashScope 审核拦
+    const info = classifyLlmError({
+      status: 400,
+      message:
+        '400 data: {"error":{"code":"data_inspection_failed","param":null,' +
+        '"message":"Input text data may contain inappropriate content.",' +
+        '"type":"data_inspection_failed","id":"chatcmpl-dedcead3-ce18-9982-84f1-408beb1b1b12"}}'
+    })
+    expect(info.kind).toBe('content')
+    expect(info.message).toContain('内容审核')
+    expect(info.message).toContain('重发') // 给行动指引而非裸 JSON
+  })
+
+  it('审核形态变体（sensitive / prohibited）同样归 content；普通 400 仍是 unknown', () => {
+    expect(classifyLlmError({ status: 400, message: 'your input contains sensitive information' }).kind).toBe('content')
+    expect(classifyLlmError({ status: 400, message: 'response prohibited by policy' }).kind).toBe('content')
+    expect(classifyLlmError({ status: 400, message: 'max_tokens too large' }).kind).toBe('unknown')
+  })
+
   it('HTTP 429 → rate；5xx → server', () => {
     expect(classifyLlmError({ status: 429, message: 'rate limited' }).kind).toBe('rate')
     expect(classifyLlmError({ status: 503, message: 'overloaded' }).kind).toBe('server')

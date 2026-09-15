@@ -2,7 +2,7 @@
 // 目标：把各家 OpenAI 兼容端点的报错翻译成 能直接行动的中文提示，
 // 区分四类：网络不通 / Key 无效 / 模型名或端点不存在 / 服务端异常。
 
-export type LlmErrorKind = 'network' | 'auth' | 'model' | 'rate' | 'server' | 'unknown'
+export type LlmErrorKind = 'network' | 'auth' | 'model' | 'rate' | 'server' | 'content' | 'unknown'
 
 export interface LlmErrorInfo {
   kind: LlmErrorKind
@@ -53,6 +53,18 @@ export function classifyLlmError(err: unknown): LlmErrorInfo {
     }
   }
   if (status === 400) {
+    // 内容审核拦截（国内厂商普遍形态：千问/豆包 data_inspection_failed、
+    // 智谱 sensitive 类）——重试没有意义，要的是"改措辞/删附件内容"的行动指引。
+    if (/data_inspection_failed|inappropriate content|content_policy|content filter|sensitive|prohibited/i.test(raw)) {
+      return {
+        kind: 'content',
+        message:
+          '请求被模型服务商的**内容审核**拦截（HTTP 400），不是网络或配置问题。' +
+          '常见诱因：对话里含附件正文（厂商审核分不清"引用"还是"输入"）、敏感词、或过长的代码/数据。' +
+          '可尝试：① 换个措辞重发这条 ② 若是带附件的会话，把敏感段落删掉或换本地能处理的模型 ③ 开新会话绕开被拦的历史。' +
+          `（${hint}）`
+      }
+    }
     if (/model/i.test(raw)) {
       return { kind: 'model', message: `请求被拒绝：模型名可能不存在或当前账号无权使用。${hint}` }
     }
