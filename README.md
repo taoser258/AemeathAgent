@@ -1,11 +1,13 @@
-# Aemeath Agent
+<h1 align="center">Aemeath Agent</h1>
 
-![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4)
-![Electron](https://img.shields.io/badge/Electron-39-2b2e3a?logo=electron&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
-![License](https://img.shields.io/badge/license-PolyForm--Noncommercial-yellow)
-![MCP](https://img.shields.io/badge/MCP-client-orange)
-![测试](https://img.shields.io/badge/tests-695%20passing-brightgreen)
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4" alt="平台">
+  <img src="https://img.shields.io/badge/Electron-39-2b2e3a?logo=electron&logoColor=white" alt="Electron">
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/license-PolyForm--Noncommercial-yellow" alt="License">
+  <img src="https://img.shields.io/badge/MCP-client-orange" alt="MCP">
+  <img src="https://img.shields.io/badge/tests-695%20passing-brightgreen" alt="测试">
+</p>
 
 以《鸣潮》角色 **爱弥斯** 为主题的 Windows 桌面 AI 伴侣：一个常驻桌宠小窗（透明 / 置顶 / 可拖拽）+ 一个主窗（聊天 / 工作 / 学习）。核心是一套自研的 agent 引擎——工具调用、权限审批、可恢复执行、记忆与检索、学习闭环，桌宠是它的"脸"，聊天只是最初的能力。
 
