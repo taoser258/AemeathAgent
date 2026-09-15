@@ -1,5 +1,12 @@
 # Aemeath Agent
 
+![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4)
+![Electron](https://img.shields.io/badge/Electron-39-2b2e3a?logo=electron&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
+![License](https://img.shields.io/badge/license-PolyForm--Noncommercial-yellow)
+![MCP](https://img.shields.io/badge/MCP-client-orange)
+![测试](https://img.shields.io/badge/tests-695%20passing-brightgreen)
+
 以《鸣潮》角色 **爱弥斯** 为主题的 Windows 桌面 AI 伴侣：一个常驻桌宠小窗（透明 / 置顶 / 可拖拽）+ 一个主窗（聊天 / 工作 / 学习）。核心是一套自研的 agent 引擎——工具调用、权限审批、可恢复执行、记忆与检索、学习闭环，桌宠是它的"脸"，聊天只是最初的能力。
 
 | 主窗聊天 | 桌宠 |
@@ -114,6 +121,14 @@ AemeathAgent/
 - **打包下载组件卡死/超时**：直连被墙时挂 npmmirror 镜像；但全局代理开着时镜像反而超时——镜像与代理**二选一**。组件缓存在 `%LOCALAPPDATA%\electron-builder\Cache`。
 - **想彻底重置数据**：用户数据在 `%AppData%\aemeath-agent`（配置 / 会话 / 密钥加密档），卸载不删除它；手动删该目录即清空。
 
-## 许可与说明
+## 许可与素材署名
 
-本项目为个人开发的桌面 AI 伴侣，当前处于内测阶段。角色"爱弥斯"形象素材版权归其原作方所有，本仓库仅作学习交流用途，不含任何商业分发意图。
+**代码许可**：本仓库源码与文档采用 [PolyForm Noncommercial License 1.0.0](LICENSE)——**禁止任何商业用途**（个人使用、学习、研究、修改、非商业分享均允许），详见 LICENSE 文件。
+
+**素材署名与版权**：
+
+- 角色"爱弥斯"形象归《鸣潮》（库洛游戏）所有，本项目仅作同人学习用途，不含任何商业分发意图。
+- 桌宠立绘来自小红书 **"Moon月"**。
+- 主窗 Q 版头像来自小红书 **"糯米洛"**。
+
+上述二创素材版权归原画师/原作方所有；如权利人希望移除，请提 issue 联系，我会第一时间处理。
