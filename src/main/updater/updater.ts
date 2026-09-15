@@ -1,0 +1,138 @@
+/**
+ * 自动更新。
+ *
+ * 现实约束（评估结论）：
+ * · 仓库是 GitHub 私有库且本机无 gh/PAT —— GitHub Releases 渠道要等「仓库公开
+ * 或配置 token」才真正可用；代码按标准 github provider 写（publish 配置在
+ * package.json build），渠道条件成熟即插即用，不用改代码。
+ * · 「失败静默降级不弹窗骚扰」：启动后延迟自动检查一次，任何失败
+ * （404/断网/无 latest.yml）只记状态、不弹任何窗；「检查更新」按钮在关于页，
+ * 用户主动触发才有反馈。
+ * · autoDownload=false：发现新版本先问（渲染层出「下载」按钮），下载完成后
+ * 再问「重启安装」——改用户机器的动作一律过用户的手（红线②同款精神）。
+ * · dev（未打包）不初始化：electron-updater 在 dev 下拿不到安装器语义；关于页
+ * 据此显示「仅安装版可用」。
+ *
+ * 演练通道：环境变量 AEMEATH_UPDATE_FEED=generic:<url> 把源指到本地假服务器
+ * （验收用假源演练；正常发布不设这个变量，走 package.json build 里的 github 配置）。
+ */
+import { app, ipcMain, shell, BrowserWindow } from 'electron'
+import { autoUpdater } from 'electron-updater'
+import {
+  UPDATE_CHECK,
+  UPDATE_DOWNLOAD,
+  UPDATE_OPEN_RELEASES,
+  UPDATE_QUIT_INSTALL,
+  UPDATE_STATUS
+} from '@shared/ipc-channels'
+import type { UpdateStatus } from '@shared/types'
+
+let lastStatus: UpdateStatus = { state: 'idle' }
+let availableVersion: string | null = null
+
+/** 状态广播给所有窗口（关于页在设置窗；autoUpdater 事件不来自任何 IPC 调用，需持久广播） */
+function broadcast(): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send(UPDATE_STATUS, lastStatus)
+  }
+}
+
+function setStatus(next: UpdateStatus): void {
+  lastStatus = next
+  broadcast()
+}
+
+export function registerUpdaterIpc(): void {
+  // 假源演练通道：AEMEATH_UPDATE_FEED=generic:http://127.0.0.1:8123/
+  const feed = process.env.AEMEATH_UPDATE_FEED
+  if (typeof feed === 'string' && feed.startsWith('generic:')) {
+    autoUpdater.setFeedURL({ provider: 'generic', url: feed.slice('generic:'.length) })
+  }
+
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.disableWebInstaller = true // Windows NSIS：用原生安装器而非自带 web 安装
+
+  autoUpdater.on('error', (err) => {
+    // 静默降级：状态记给关于页，不弹窗（启动自动检查失败也走这里）
+    setStatus({ state: 'error', error: String(err?.message ?? err).slice(0, 200) })
+  })
+  autoUpdater.on('update-available', (info) => {
+    availableVersion = info.version
+    setStatus({ state: 'available', version: info.version })
+  })
+  autoUpdater.on('update-not-available', () => setStatus({ state: 'not-available' }))
+  autoUpdater.on('download-progress', (p) => {
+    setStatus({
+      state: 'downloading',
+      version: availableVersion ?? undefined,
+      percent: Math.round(p.percent)
+    })
+  })
+  autoUpdater.on('update-downloaded', (info) =>
+    setStatus({ state: 'downloaded', version: info.version })
+  )
+
+  ipcMain.handle(UPDATE_CHECK, async (): Promise<UpdateStatus> => {
+    if (!app.isPackaged) {
+      setStatus({ state: 'idle', dev: true })
+      return lastStatus
+    }
+    setStatus({ state: 'checking' })
+    try {
+      await autoUpdater.checkForUpdates()
+    } catch (err) {
+      // checkForUpdates 抛错（网络/404）时 error 事件未必触发，这里兜底记状态
+      if (lastStatus.state === 'checking') {
+        setStatus({ state: 'error', error: String(err).slice(0, 200) })
+      }
+    }
+    return lastStatus
+  })
+
+  ipcMain.handle(UPDATE_DOWNLOAD, async (): Promise<UpdateStatus> => {
+    if (!app.isPackaged) return { state: 'idle', dev: true }
+    try {
+      await autoUpdater.downloadUpdate()
+    } catch (err) {
+      if (lastStatus.state !== 'downloading' && lastStatus.state !== 'downloaded') {
+        setStatus({ state: 'error', error: String(err).slice(0, 200) })
+      }
+    }
+    return lastStatus
+  })
+
+  ipcMain.handle(UPDATE_QUIT_INSTALL, (): { ok: boolean } => {
+    // quitAndInstall 触发 before-quit → markAppQuitting 已接线（app-quit.ts），
+    // 桌宠窗的 close 拦截不会卡住退出
+    try {
+      autoUpdater.quitAndInstall(false, true)
+      return { ok: true }
+    } catch {
+      return { ok: false }
+    }
+  })
+
+  // 无新动作可点时的出口：打开 Releases 页手动下载
+  ipcMain.handle(UPDATE_OPEN_RELEASES, (): { ok: boolean } => {
+    void shell.openExternal('https://github.com/taoser258/AemeathAgent/releases')
+    return { ok: true }
+  })
+}
+
+/** 打包态下启动后延迟自动检查一次（静默；失败不留状态给 UI） */
+export function scheduleStartupUpdateCheck(): void {
+  if (!app.isPackaged) return
+  setTimeout(() => {
+    autoUpdater
+      .checkForUpdates()
+      .then(() => {
+        // 无新版本且无 error 事件时，把 checking 归一回 idle（不打扰）
+        if (lastStatus.state === 'checking') setStatus({ state: 'idle' })
+      })
+      .catch(() => {
+        // 静默：启动自动检查失败不留任何状态给 UI
+        if (lastStatus.state === 'checking') lastStatus = { state: 'idle' }
+      })
+  }, 8_000)
+}

@@ -1,0 +1,374 @@
+/* ══════════════════════════════════════════════════════════
+   genui 生成式 UI 组件样式（genui 适配）
+   铁律：颜色一律 var()（--genui-* 色板 + 既有语义 token），不写死色值——
+   深浅主题切换即时生效，无需 JS 读色。图表 SVG 的 fill/stroke 同理走变量。
+   布局基座：.genui-root 纵向 flex，gap 由文档字段控制（默认 12）。
+   ══════════════════════════════════════════════════════════ */
+
+.genui-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.genui-doc-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.genui-text { font-size: var(--font-size-base); color: var(--text-primary); line-height: 1.6; }
+.genui-t-h1 { font-size: 22px; font-weight: 800; color: var(--text-strong); }
+.genui-t-h2 { font-size: 18px; font-weight: 700; color: var(--text-strong); }
+.genui-t-h3 { font-size: 16px; font-weight: 700; color: var(--text-strong); }
+.genui-t-muted { color: var(--text-secondary); }
+.genui-t-caption { font-size: 12px; color: var(--text-faint); }
+.genui-center { text-align: center; }
+
+.genui-box { display: flex; min-width: 0; }
+.genui-row { flex-direction: row; align-items: center; }
+.genui-col { flex-direction: column; }
+.genui-wrap { flex-wrap: wrap; }
+.genui-spacer-row { justify-content: space-between; }
+.genui-box > * { min-width: 0; }
+
+.genui-grid { display: grid; gap: 10px; }
+.genui-grid-cell { min-width: 0; }
+
+.genui-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-base);
+  background: var(--bg-elevated);
+}
+.genui-card-title { font-weight: 700; color: var(--text-strong); font-size: 14px; }
+
+.genui-divider { border: none; border-top: 1px solid var(--line); margin: 2px 0; }
+.genui-spacer { height: 6px; }
+
+/* tone 底色（结论卡/风险卡/hero/callout 共用）：语义色极淡底 */
+.genui-tone-accent { background: var(--accent-soft); }
+.genui-tone-success { background: color-mix(in srgb, var(--genui-success) 10%, var(--bg-elevated)); }
+.genui-tone-warning { background: color-mix(in srgb, var(--genui-warning) 12%, var(--bg-elevated)); }
+.genui-tone-danger { background: color-mix(in srgb, var(--genui-danger) 10%, var(--bg-elevated)); }
+.genui-tone-info { background: color-mix(in srgb, var(--genui-info) 10%, var(--bg-elevated)); }
+
+.genui-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+}
+.genui-hero-eyebrow { font-size: 12px; letter-spacing: 1px; color: var(--text-secondary); text-transform: uppercase; }
+.genui-hero-value { font-size: 52px; font-weight: 800; line-height: 1.1; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.genui-hero-title { font-size: 16px; font-weight: 700; color: var(--text-strong); }
+.genui-hero-sub { font-size: 13px; color: var(--text-secondary); }
+.genui-hero-delta { font-size: 13px; font-weight: 700; }
+.genui-hero-num { font-size: 40px; }
+
+.genui-stat { display: flex; flex-direction: column; gap: 2px; }
+.genui-stat-label { font-size: 12px; color: var(--text-secondary); }
+.genui-stat-value { font-size: 26px; font-weight: 800; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.genui-stat-delta { font-size: 12px; font-weight: 700; }
+.genui-spark { display: block; margin-top: 2px; }
+
+.genui-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1px solid;
+  border-radius: var(--radius-round);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.genui-progress { display: flex; flex-direction: column; gap: 4px; min-width: 140px; flex: 1; }
+.genui-progress-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); }
+.genui-progress-track { height: 8px; border-radius: var(--radius-round); background: var(--bg-soft); overflow: hidden; }
+.genui-progress-fill { height: 100%; border-radius: var(--radius-round); background: var(--accent); transition: width 300ms ease; }
+.genui-ring { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; }
+.genui-ring-text { font-size: 13px; font-weight: 700; fill: var(--text-strong); }
+.genui-ring-label { font-size: 12px; color: var(--text-secondary); }
+
+.genui-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.genui-list-node { list-style: none; margin-left: -18px; }
+.genui-list-title { color: var(--text-primary); }
+.genui-list-desc { font-size: 12px; color: var(--text-secondary); }
+
+.genui-kv { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.genui-kv-row { display: flex; gap: 10px; font-size: 13px; }
+.genui-kv dt { color: var(--text-secondary); min-width: 84px; flex-shrink: 0; }
+.genui-kv dd { margin: 0; color: var(--text-strong); word-break: break-all; }
+
+.genui-avatar {
+  display: inline-flex;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.genui-timeline { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.genui-tl-item { display: flex; gap: 10px; position: relative; }
+.genui-tl-item::before { content: ''; position: absolute; left: 5px; top: 14px; bottom: -12px; width: 1px; background: var(--line-strong); }
+.genui-tl-item:last-child::before { display: none; }
+.genui-tl-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 3px; }
+.genui-tl-title { font-weight: 700; color: var(--text-strong); font-size: 13px; }
+.genui-tl-desc { font-size: 12px; color: var(--text-secondary); }
+.genui-tl-time { font-size: 11px; color: var(--text-faint); }
+
+.genui-crumb { display: flex; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); }
+.genui-crumb b { color: var(--text-strong); }
+.genui-crumb-sep { margin: 0 6px; color: var(--text-faint); }
+
+.genui-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.genui-step { display: flex; gap: 10px; align-items: flex-start; opacity: 0.55; }
+.genui-step-done, .genui-step-now { opacity: 1; }
+.genui-step-mark {
+  width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; color: var(--text-secondary);
+}
+.genui-step-now .genui-step-mark { border-color: var(--accent); color: var(--accent); }
+.genui-step-done .genui-step-mark { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.genui-step-title { font-size: 13px; font-weight: 700; color: var(--text-strong); }
+.genui-step-desc { font-size: 12px; color: var(--text-secondary); }
+
+.genui-callout {
+  padding: 10px 14px;
+  border-left: 3px solid;
+  border-radius: 0 var(--radius-base) var(--radius-base) 0;
+  background: var(--bg-soft);
+}
+.genui-callout-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+.genui-callout-body { font-size: 13px; color: var(--text-primary); line-height: 1.6; }
+
+.genui-code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-code);
+  color: var(--code-plain);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.genui-diff-file { border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.genui-diff-path { padding: 4px 10px; font-size: 12px; font-weight: 700; background: var(--bg-soft); color: var(--text-strong); font-family: var(--font-mono); }
+.genui-diff-line { padding: 1px 10px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.genui-diff-line.del { background: color-mix(in srgb, var(--genui-danger) 9%, transparent); color: var(--text-primary); }
+.genui-diff-line.add { background: color-mix(in srgb, var(--genui-success) 9%, transparent); color: var(--text-primary); }
+
+.genui-tree { font-size: 13px; }
+.genui-tree-row { display: flex; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 4px; }
+.genui-tree-dir { cursor: pointer; }
+.genui-tree-dir:hover { background: var(--bg-soft); }
+.genui-tree-caret { width: 12px; color: var(--text-faint); font-size: 10px; }
+.genui-tree-icon { font-size: 12px; }
+
+/* ── 表格 ── */
+.genui-table-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.genui-table-tools { display: flex; gap: 6px; }
+.genui-table-filter {
+  align-self: flex-start;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+  width: 220px;
+}
+.genui-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.genui-table th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1.5px solid var(--line-strong);
+  color: var(--text-secondary);
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.genui-table th:hover { color: var(--text-strong); }
+.genui-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); color: var(--text-primary); }
+.genui-table tr:hover td { background: var(--bg-soft); }
+.genui-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+.genui-sort { font-size: 9px; margin-left: 3px; color: var(--accent); }
+.genui-total-row td { font-weight: 800; color: var(--text-strong); border-top: 1.5px solid var(--line-strong); background: var(--bg-soft); }
+.genui-detail-row td { background: var(--bg-base-2); padding: 8px 14px; }
+.genui-expand { border: none; background: none; color: var(--text-faint); cursor: pointer; font-size: 10px; margin-right: 4px; padding: 0; }
+.genui-cell-bar { position: relative; display: block; min-width: 90px; padding: 2px 6px; border-radius: 4px; }
+.genui-cell-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); border-radius: 4px; }
+.genui-cell-group { font-weight: 800; color: var(--text-strong); font-size: 12px; }
+.genui-group-row td { background: var(--bg-base-2); border-bottom: 1px solid var(--line-strong); padding: 5px 10px; }
+
+/* ── 图表 ── */
+.genui-chart { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.genui-chart-title { font-size: 13px; font-weight: 700; color: var(--text-strong); }
+.genui-svg { width: 100%; max-width: 520px; height: auto; display: block; }
+.genui-axis { font-size: 10px; fill: var(--text-faint); }
+.genui-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-primary); }
+.genui-legend-h { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
+.genui-legend li { display: flex; align-items: center; gap: 6px; }
+.genui-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+.genui-donut-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.genui-param { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.genui-param input { flex: 1; accent-color: var(--accent); }
+.genui-param code { font-size: 11px; color: var(--text-faint); min-width: 40px; }
+
+/* ── 交互 ── */
+.genui-btn {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--control-bg);
+  color: var(--text-strong);
+  font-family: inherit;
+}
+.genui-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.genui-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.genui-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.genui-btn-primary:hover:not(:disabled) { background: var(--accent-strong); color: var(--accent-ink); }
+.genui-btn-danger { background: var(--genui-danger); border-color: var(--genui-danger); color: #fff; }
+.genui-btn-success { background: var(--genui-success); border-color: var(--genui-success); color: #fff; }
+.genui-btn-ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
+.genui-btn-full { width: 100%; }
+.genui-btn-sm { padding: 3px 10px; font-size: 12px; }
+.genui-fired { font-weight: 400; opacity: 0.7; font-size: 11px; }
+
+.genui-mini-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--control-bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.genui-mini-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.genui-link { color: var(--accent); text-decoration: none; }
+.genui-link:hover { text-decoration: underline; }
+.genui-link-plain { color: var(--text-secondary); }
+
+.genui-field { display: flex; flex-direction: column; gap: 4px; min-width: 160px; }
+.genui-field-label { font-size: 12px; color: var(--text-secondary); }
+.genui-field input, .genui-field select, .genui-field textarea {
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.genui-field input:focus, .genui-field select:focus, .genui-field textarea:focus { box-shadow: var(--shadow-control-focus); border-color: var(--accent); }
+.genui-field textarea { resize: vertical; }
+.genui-slider b { color: var(--text-strong); }
+.genui-slider input { width: 100%; accent-color: var(--accent); }
+
+.genui-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.genui-switch input { display: none; }
+.genui-switch-track { width: 34px; height: 18px; border-radius: 9px; background: var(--line-strong); position: relative; transition: background 200ms; }
+.genui-switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left 200ms; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.genui-switch input:checked + .genui-switch-track { background: var(--accent); }
+.genui-switch input:checked + .genui-switch-track .genui-switch-thumb { left: 18px; }
+
+.genui-check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.genui-check input { accent-color: var(--accent); }
+
+.genui-radio { display: flex; flex-direction: column; gap: 4px; }
+.genui-radio-opt { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+.genui-radio-opt input { accent-color: var(--accent); }
+.genui-radio-opt.genui-correct { background: color-mix(in srgb, var(--genui-success) 12%, transparent); }
+.genui-radio-opt.genui-wrong { background: color-mix(in srgb, var(--genui-danger) 12%, transparent); }
+.genui-grade { font-size: 12px; font-weight: 700; margin-top: 2px; }
+.genui-explain { font-weight: 400; color: var(--text-secondary); }
+
+.genui-submit { display: flex; align-items: center; gap: 10px; }
+.genui-submit-hint { font-size: 12px; color: var(--text-secondary); }
+
+.genui-tabs { display: flex; flex-direction: column; gap: 0; }
+.genui-tabs-bar { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
+.genui-tab { appearance: none; border: none; background: none; padding: 6px 12px; font-size: 13px; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; font-family: inherit; }
+.genui-tab-on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
+.genui-tabs-panel { padding: 10px 2px; display: flex; flex-direction: column; gap: 10px; }
+
+.genui-accordion { display: flex; flex-direction: column; gap: 4px; }
+.genui-acc-head { appearance: none; display: flex; gap: 6px; align-items: center; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-strong); padding: 7px 10px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.genui-acc-head:hover { border-color: var(--accent); }
+.genui-acc-caret { color: var(--text-faint); font-size: 10px; }
+.genui-acc-body { padding: 8px 4px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ── 生成中 / 校验失败 ── */
+.genui-pending {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.genui-pending-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: genui-pulse 1s ease-in-out infinite; }
+@keyframes genui-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+.genui-invalid { margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.genui-invalid-reason { font-size: 12px; color: var(--genui-warning); }
+
+/* ── JSON 树查看器（json 组件）：块级行 + 逐层 padding 累加缩进；行内元素自然成行 ── */
+.genui-json {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.75;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-code);
+  overflow-x: auto;
+}
+.genui-jrow { display: block; white-space: nowrap; }
+.genui-jclose { display: block; }
+.genui-jtoggle {
+  appearance: none; border: none; background: none; cursor: pointer;
+  color: var(--text-faint); font-size: 10px; width: 14px; padding: 0; margin-right: 2px;
+  vertical-align: middle;
+}
+.genui-jtoggle:hover { color: var(--accent); }
+.genui-jk { color: var(--code-keyword); margin-right: 4px; }
+.genui-jk::after { content: ':'; color: var(--text-faint); }
+.genui-jpunct { color: var(--text-secondary); }
+.genui-js { color: var(--code-string); }
+.genui-jn { color: var(--code-number); }
+.genui-jb { color: var(--violet-400); }
+.genui-jnull { color: var(--text-faint); font-style: italic; }

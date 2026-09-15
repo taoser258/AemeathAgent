@@ -1,0 +1,1167 @@
+/* ══════════════════════════════════════════════════════════
+   Aemeath · 晨樱浅色设计令牌
+   基于爱弥斯壁纸的人物形象与色彩（樱粉发 / 暖金饰 / 翼蓝 / 墨紫瞳）
+   绘制的简约清爽浅色界面。全部走 CSS 变量，P4 换肤只动本文件。
+   桌宠窗（pet.html）不引本文件 —— 它需要 body 全透明。
+   ══════════════════════════════════════════════════════════ */
+
+:root {
+  /* 原生控件（滚动条/表单/自动填充）跟随主题；iframe 内文档不受影响 */
+  color-scheme: light;
+
+  /* ── 背景层次（暖白纸感，微微偏粉） ── */
+  --bg-base: #fbf7f9;
+  --bg-base-2: #f7f0f4;
+  --bg-panel: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-soft: #f6eef2;
+  --bg-input: #ffffff;
+
+  /* ── 文本（墨紫系） ── */
+  --text-strong: #2e2430;
+  --text-primary: #4a3d4e;
+  --text-secondary: #8d7f92;
+  --text-faint: #b9adc0;
+
+  /* ── 樱粉主色阶 ── */
+  --pink-100: #fdeef4;
+  --pink-200: #fbd9e7;
+  --pink-300: #f9bcd4;
+  --pink-400: #f295c2;
+  --pink-400-deep: #f0679e;
+  --pink-500: #e7548f;
+  --pink-600: #d13d7c;
+
+  /* ── 辅助色：翼蓝 / 星环紫罗兰 / 暖金 ── */
+  --aqua-400: #62b8d8;
+  --violet-400: #9f7aea;
+  --gold-400: #e8b04b;
+
+  /* ── 语义 ── */
+  --accent: var(--pink-400-deep);
+  --accent-strong: var(--pink-500);
+  --accent-soft: rgba(240, 103, 158, 0.1);
+  --accent-ink: #ffffff; /* 樱粉底色上的文字 */
+  --pill-bg: rgba(255, 255, 255, 0.9); /* 悬浮胶囊底（模式/状态胶囊、窗控 hover） */
+  --pill-border: var(--line);
+  --control-bg: #ffffff; /* 卡片内按钮/选中项底 */
+  --danger: #e0526e;
+  --line: rgba(46, 36, 48, 0.08);
+  --line-strong: rgba(46, 36, 48, 0.15);
+
+  /* ── 窗壳呼吸区渐变（主窗/设置窗外壳底色， token 化） ── */
+  --shell-gradient:
+    radial-gradient(ellipse 60% 40% at 12% 0%, rgba(240, 103, 158, 0.08), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 96% 100%, rgba(159, 122, 234, 0.07), transparent 60%),
+    linear-gradient(180deg, #fdf9fb 0%, #f9f2f6 100%);
+
+  /* ── 阴影（浅色系：低透明度大模糊） ── */
+  --shadow-soft: 0 1px 5px rgba(46, 38, 41, 0.07);
+  --shadow-panel: 0 4px 24px rgba(46, 38, 41, 0.07);
+  --shadow-pop: 0 14px 38px rgba(65, 45, 52, 0.15);
+  --shadow-control-focus: 0 0 0 3px rgba(240, 103, 158, 0.14);
+
+  /* ── 代码块（浅色主题：浅底深字，跟着主题走——
+     "浅色界面上一大片黑"后，取消原来的"深色岛"口径） ── */
+  --bg-code: #f5eff3;
+  --bg-code-bar: #ece3ea;
+  --code-plain: #3a3340;
+  --code-keyword: #b3306b;
+  --code-string: #1a7f52;
+  --code-func: #3f5aa6;
+  --code-number: #96601a;
+  --code-comment: #8a8194;
+  --code-title: #8a6116;
+
+  /* ── 终端（PTY 输出）：浅色主题用浅底深字；ANSI 16 色另配一套（否则白字在浅底上看不见） ── */
+  --term-bg: #fbf8fa;
+  --term-fg: #2f2a36;
+  --term-ansi-0: #3a3340;
+  --term-ansi-1: #c0392b;
+  --term-ansi-2: #1a7f52;
+  --term-ansi-3: #96601a;
+  --term-ansi-4: #2f5fa8;
+  --term-ansi-5: #a3369a;
+  --term-ansi-6: #0e7490;
+  --term-ansi-7: #6b6478;
+  --term-ansi-8: #7d7588;
+  --term-ansi-9: #e05252;
+  --term-ansi-10: #22a06b;
+  --term-ansi-11: #b8791b;
+  --term-ansi-12: #4a7ecb;
+  --term-ansi-13: #c04fb0;
+  --term-ansi-14: #0f93b0;
+  --term-ansi-15: #2a2430;
+
+  /* ── 圆角 ── */
+  --radius-sm: 6px;
+  --radius-base: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-round: 999px;
+
+  /* ── 排版：霞鹜文楷（界面）+ Maple Mono（代码），本地打包（OFL 许可） ── */
+  --font-body: 'LXGW WenKai Screen', 'Microsoft YaHei UI', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:
+    'Maple Mono', Consolas, 'Cascadia Code', 'Segoe UI Symbol', 'Cambria Math', monospace;
+  --ls-base: 0.3px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-lg: 18px;
+
+  /* ── genui 生成式 UI 色板（genui 适配）：分类色 8 支 + 语义色。
+     深浅主题各一套（守护测试要求深色覆盖浅色全部颜色变量）；图表/卡片派生色
+     （轴线/网格/文字/底色）在 genui.css 里直接 var() 现有 token，自动跟随主题。 ── */
+  --genui-c1: #f0679e;
+  --genui-c2: #62b8d8;
+  --genui-c3: #9f7aea;
+  --genui-c4: #e8b04b;
+  --genui-c5: #1a7f52;
+  --genui-c6: #3f5aa6;
+  --genui-c7: #d97706;
+  --genui-c8: #0e7490;
+  --genui-success: #1a7f52;
+  --genui-warning: #b8791b;
+  --genui-info: #3f5aa6;
+  --genui-danger: #e0526e;
+  /* delta 涨跌色（中国股市惯例：涨=红、跌=绿） */
+  --genui-up: #d13d7c;
+  --genui-down: #1a7f52;
+}
+
+/*
+ * 深色主题：<html data-theme='dark'> 时覆盖颜色类 token。
+ * 规则（tests/theme-tokens.test.ts 守护）：只覆盖颜色类（背景/文本/主色阶/辅助色/语义/阴影/代码岛），
+ * 圆角与排版 token 严禁出现在这里——它们不是主题属性。
+ * 设计取向：深紫黑底延续"暖紫夜色"，樱粉整体提亮一档保证对比度（accent 换 pink-400、
+ * accent-ink 换深字）。
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* ── 背景层次（深紫夜色） ── */
+  --bg-base: #171219;
+  --bg-base-2: #1e1723;
+  --bg-panel: #241c2b;
+  --bg-elevated: #2b2133;
+  --bg-soft: #2e2437;
+  --bg-input: #201827;
+
+  /* ── 文本（浅紫灰，保持墨紫血统） ── */
+  --text-strong: #f3edf6;
+  --text-primary: #d9cfe2;
+  --text-secondary: #a295ad;
+  /* 9.15 提亮：原 #776a82 对面板底（#241c2b）对比度仅 3.27，低于正文可读线 4.5——
+     深色下"辅助说明/计数/时间戳"这类文字发灰看不清。现值对比度约 5.8。 */
+  --text-faint: #9c8fa8;
+
+  /* ── 樱粉主色阶（整体提亮一档） ── */
+  --pink-100: #3c2131;
+  --pink-200: #552b43;
+  --pink-300: #8f4d70;
+  --pink-400: #ee9ac5;
+  --pink-400-deep: #f4a9ce;
+  --pink-500: #f8b7d4;
+  --pink-600: #fcc6de;
+
+  /* ── 辅助色（暗底提亮） ── */
+  --aqua-400: #82cce8;
+  --violet-400: #b89df6;
+  --gold-400: #f0c069;
+
+  /* ── 语义 ── */
+  --accent: var(--pink-400);
+  --accent-strong: var(--pink-500);
+  --accent-soft: rgba(238, 154, 197, 0.14);
+  --accent-ink: #1c141e; /* 亮樱粉底色上的文字（深） */
+  --pill-bg: rgba(46, 36, 55, 0.88); /* 深紫半透明，浮在夜色上 */
+  --pill-border: rgba(243, 237, 246, 0.14);
+  --control-bg: #2b2133;
+  --danger: #f07a90;
+  /* 9.15 加深：8% 白在深色面板上几乎不可见（卡片/分区边界糊在一起）→ 14% */
+  --line: rgba(243, 237, 246, 0.14);
+  --line-strong: rgba(243, 237, 246, 0.17);
+
+  /* ── 窗壳呼吸区渐变（深紫夜色 + 更弱的粉晕） ── */
+  --shell-gradient:
+    radial-gradient(ellipse 60% 40% at 12% 0%, rgba(238, 154, 197, 0.06), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 96% 100%, rgba(184, 157, 246, 0.05), transparent 60%),
+    linear-gradient(180deg, #14101a 0%, #1a1421 100%);
+
+  /* ── 阴影（深色系：加重加深才可见） ── */
+  --shadow-soft: 0 1px 5px rgba(0, 0, 0, 0.4);
+  --shadow-panel: 0 4px 24px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 14px 38px rgba(0, 0, 0, 0.55);
+  --shadow-control-focus: 0 0 0 3px rgba(238, 154, 197, 0.22);
+
+  /* ── 代码块（深色主题：比底色略浮一层的岛，语法色提亮） ── */
+  --bg-code: #221b29;
+  --bg-code-bar: #2b2233;
+  --code-plain: #ece4f0;
+  --code-keyword: #f7a8cd;
+  --code-string: #a8dfc0;
+  --code-func: #a5b8f5;
+  --code-number: #f5c288;
+  --code-comment: #8b7f97;
+  --code-title: #f5d795;
+
+  /* ── 终端（深色）：近黑底 + 亮字，ANSI 16 色沿用原深色盘 ── */
+  --term-bg: #14151a;
+  --term-fg: #d6d9e0;
+  --term-ansi-0: #6b7280;
+  --term-ansi-1: #f25d5d;
+  --term-ansi-2: #4ec97f;
+  --term-ansi-3: #e5c07b;
+  --term-ansi-4: #61afef;
+  --term-ansi-5: #c678dd;
+  --term-ansi-6: #56b6c2;
+  --term-ansi-7: #d6d9e0;
+  --term-ansi-8: #8a919e;
+  --term-ansi-9: #ff7b7b;
+  --term-ansi-10: #7ee2a0;
+  --term-ansi-11: #f0d399;
+  --term-ansi-12: #8cc5ff;
+  --term-ansi-13: #e0a3ec;
+  --term-ansi-14: #7fd7e3;
+  --term-ansi-15: #ffffff;
+
+  /* ── genui 色板（深色：分类色提亮一档，深底上保持对比） ── */
+  --genui-c1: #f4a9ce;
+  --genui-c2: #82cce8;
+  --genui-c3: #b89df6;
+  --genui-c4: #f0c069;
+  --genui-c5: #4ec97f;
+  --genui-c6: #a5b8f5;
+  --genui-c7: #f5a623;
+  --genui-c8: #56b6c2;
+  --genui-success: #4ec97f;
+  --genui-warning: #e5c07b;
+  --genui-info: #a5b8f5;
+  --genui-danger: #f07a90;
+  --genui-up: #f8b7d4;
+  --genui-down: #4ec97f;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* 透明窗铁律：transparent 窗的 body 必须全透明，
+     任何不透明背景都会把整个窗口矩形涂实——四角 CSS 圆角全部失效，
+     只剩 Win11 系统级 ~8px 圆角（主窗"四角不够圆"的根因）。
+     页面底色由各壳体自绘：主窗 .chat-page / 设置窗 .settings-shell 均自带渐变背景 + 大圆角。 */
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  letter-spacing: 0.3px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(240, 103, 158, 0.22);
+}
+
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(46, 36, 48, 0.14);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(46, 36, 48, 0.26);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+button {
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+/* ===== 应用骨架 ===== */
+
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* 铺满整个窗口，四角靠这里的圆角平滑（配合窗体 transparent） */
+  border-radius: 28px;
+  overflow: hidden;
+  background: var(--shell-gradient); /* ：token 化 */
+}
+
+/* 星野迁入壳内，随圆角裁剪 */
+.app-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.4px 1.4px at 8% 18%, rgba(46, 36, 48, 0.35), transparent 100%),
+    radial-gradient(1px 1px at 26% 64%, rgba(46, 36, 48, 0.28), transparent 100%),
+    radial-gradient(1.6px 1.6px at 44% 9%, rgba(232, 176, 75, 0.5), transparent 100%),
+    radial-gradient(1px 1px at 63% 33%, rgba(46, 36, 48, 0.3), transparent 100%),
+    radial-gradient(1.4px 1.4px at 78% 12%, rgba(98, 184, 216, 0.42), transparent 100%),
+    radial-gradient(1px 1px at 91% 42%, rgba(46, 36, 48, 0.26), transparent 100%),
+    radial-gradient(1.2px 1.2px at 15% 86%, rgba(159, 122, 234, 0.35), transparent 100%),
+    radial-gradient(1px 1px at 69% 78%, rgba(46, 36, 48, 0.24), transparent 100%),
+    radial-gradient(1.3px 1.3px at 38% 55%, rgba(232, 176, 75, 0.32), transparent 100%);
+  opacity: 0.5;
+}
+
+.app-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== 窗口控制（右上角圆形描边按钮） ===== */
+/* ⚠️ 本块是「设置窗」的窗控基准（设置窗只引 global.css + settings.css）。
+   聊天窗的窗控在 chat.css 以 .chat-page 前缀覆写（特异性更高，任何加载顺序必胜）。
+   两处同名规则曾因 dev/打包加载顺序相反导致"顶栏不齐"，
+   改动任一处前先看 chat.css 同名块。 */
+
+.win-controls {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+/* 窗口控制（扁平风格） */
+.win-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  width: 34px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.win-btn:hover {
+  background: var(--bg-soft);
+  color: var(--text-strong);
+}
+
+.win-btn.close:hover {
+  background: #ff5f57;
+  color: #fff;
+}
+
+/* ===== 悬浮装饰（纯 CSS 手绘：光斑 / 虚线圆环 / 星芒） ===== */
+
+.deco-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.deco-dotted-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(240, 103, 158, 0.18);
+}
+
+.deco-soft-blob {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(242, 149, 194, 0.12), transparent 68%);
+}
+
+.deco-sparkle {
+  position: absolute;
+  color: rgba(232, 176, 75, 0.55);
+  text-shadow: 0 0 10px rgba(232, 176, 75, 0.35);
+  animation: deco-twinkle 3.2s ease-in-out infinite;
+}
+
+.deco-sparkle.pink {
+  color: rgba(240, 103, 158, 0.45);
+  text-shadow: 0 0 10px rgba(240, 103, 158, 0.3);
+}
+
+@keyframes deco-twinkle {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85) rotate(0deg);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.08) rotate(12deg);
+  }
+}
+
+/* ===== 设置页（独立窗口）===== */
+
+.settings-shell {
+  height: 100%;
+  display: flex;
+  background: var(--bg-base);
+}
+
+.settings-nav {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg-base-2);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+}
+
+.settings-nav-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 14px;
+}
+
+.settings-nav-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(240, 103, 158, 0.4);
+}
+
+.settings-nav-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.settings-nav-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: var(--radius-base);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-soft);
+}
+
+.settings-nav-item.active {
+  background: var(--pink-100);
+  color: var(--accent);
+}
+
+.settings-nav-item.soon {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.settings-nav-item.soon:hover {
+  background: transparent;
+}
+
+.settings-nav-item .soon-badge {
+  margin-left: auto;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+}
+
+.settings-nav-foot {
+  padding: 10px 8px 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.settings-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 22px 26px;
+  /* 注意：此处历史遗留的 -webkit-app-region: no-drag 已移除——
+     它的矩形盖住顶条右段，会在 Chromium 拖拽区计算里抵消 .settings-drag-strip 的 drag，
+     表现为"设置窗拖不动"。现在唯一的 drag 区就是顶条，正文无需 no-drag。 */
+}
+
+.settings-page-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.settings-page-sub {
+  margin: 0 0 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* 内容卡片 */
+.settings-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-soft);
+}
+
+.settings-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.settings-card-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-base);
+  background: var(--pink-100);
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+}
+
+.settings-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.settings-card-desc {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 0;
+}
+
+.settings-row-label {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.settings-row-sub {
+  display: block;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  margin-top: 2px;
+}
+
+.settings-hint {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+
+.settings-button {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 6px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  /* 胶囊按钮里的中文（"选择图片/清除"）在窄列里会折成两行，很难看——一律不换行 */
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.settings-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.settings-soon-card {
+  background: var(--bg-panel);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  padding: 26px 22px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+/* ── 模型设置：表单字段 / 密钥 / 人设选择 / 结果横幅 ── */
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0;
+}
+
+.settings-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-field-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.settings-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2e7d32;
+  background: rgba(46, 125, 50, 0.1);
+  border: 1px solid rgba(46, 125, 50, 0.35);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.settings-input,
+.settings-select {
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  outline: none;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.settings-input:focus,
+.settings-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(240, 103, 158, 0.12);
+}
+
+.settings-input:disabled,
+.settings-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.settings-mono {
+  font-family: var(--font-mono, 'Cascadia Code', Consolas, monospace);
+  color: var(--accent);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin: 18px 0 6px;
+}
+
+.settings-button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.settings-button.primary:hover {
+  color: #fff;
+  filter: brightness(1.06);
+}
+
+.settings-banner {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.settings-banner.ok {
+  background: rgba(46, 125, 50, 0.08);
+  border: 1px solid rgba(46, 125, 50, 0.35);
+  color: #2e7d32;
+}
+
+.settings-banner.fail {
+  background: rgba(198, 40, 40, 0.07);
+  border: 1px solid rgba(198, 40, 40, 0.35);
+  color: #c62828;
+}
+
+/* ── 模型档案列表 ── */
+
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.profile-row:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.profile-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.profile-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  object-fit: contain;
+  /* 固定白底托板：
+     不是反色——GLM/Kimi 等官方 logo 本身是黑色字形，压深色卡片底（旧 --control-bg）
+     几乎隐形。白托让官方配色原样、深浅两主题都可读。 */
+  background: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, #ffffff);
+  flex-shrink: 0;
+  padding: 3px;
+  box-sizing: border-box;
+}
+
+.profile-logo.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f0679e, #9f7aea);
+  border: none;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.profile-row.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(240, 103, 158, 0.1);
+}
+
+.profile-info {
+  /* flex:1 吃掉剩余宽度：文字块起点固定在 logo 右侧，各行对齐（否则 space-between 会按内容居中，参差不齐） */
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-badges {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.badge.ok {
+  color: #2e7d32;
+  border-color: rgba(46, 125, 50, 0.35);
+  background: rgba(46, 125, 50, 0.08);
+}
+
+.badge.warn {
+  color: #b26a00;
+  border-color: rgba(178, 106, 0, 0.35);
+  background: rgba(178, 106, 0, 0.07);
+}
+
+.profile-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.settings-button.danger {
+  color: #c62828;
+  border-color: rgba(198, 40, 40, 0.5);
+}
+
+.settings-button.danger:hover {
+  border-color: #c62828;
+  color: #c62828;
+}
+
+.settings-button.add-profile {
+  width: 100%;
+  border-style: dashed;
+  color: var(--text-secondary);
+}
+
+.settings-button.add-profile:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.profile-editor {
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 6px 0 14px;
+  background: var(--bg-base-2, var(--bg-panel));
+}
+
+.profile-editor-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.settings-soon-card .soon-badge {
+  display: inline-block;
+  margin-bottom: 8px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  color: var(--text-faint);
+}
+
+/* 开关 */
+.switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(46, 36, 48, 0.16);
+  cursor: pointer;
+  transition: background 140ms ease;
+  flex-shrink: 0;
+}
+
+.switch.on {
+  background: var(--accent);
+}
+
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 140ms ease;
+}
+
+.switch.on .switch-knob {
+  transform: translateX(18px);
+}
+
+/* ===== 电子幽灵 · 全息控制台装饰（简约科技风） ===== */
+
+/* 扫描光带（缓慢左右巡航） */
+.deco-scan {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 140px;
+  background: linear-gradient(90deg, transparent, rgba(183, 159, 242, 0.06), transparent);
+  animation: scan-x 10s linear infinite;
+}
+
+@keyframes scan-x {
+  from {
+    left: -12%;
+  }
+  to {
+    left: 104%;
+  }
+}
+
+/* ===== 设置窗壳体（透明窗圆角） ===== */
+
+.settings-shell {
+  height: 100%;
+  display: flex;
+  position: relative;
+  border-radius: 24px;
+  overflow: hidden;
+  background: var(--shell-gradient); /* ：token 化 */
+  /* ：移除 box-shadow——透明窗上阴影会画进圆角外的四角区域，
+     在浅色壁纸上显成一圈"白色光晕" */
+}
+
+/* ===== 桌宠尺寸滑动面板（独立小浮窗页） ===== */
+
+.scale-panel {
+  /* 全透明：只有标题/滑杆/百分比可见，浮在桌宠正上方
+     注意：透明窗上禁用 backdrop-filter 与任何背景色，否则整窗强制变白 */
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 14px 18px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  background: transparent;
+}
+
+.scale-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scale-panel-title {
+  font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  text-align: center;
+  letter-spacing: 3px;
+  /* 双层描边：贴身黑晕保对比，外层扩散保远看，浅色桌面也可读 */
+  text-shadow:
+    0 1px 10px rgba(0, 0, 0, 0.95),
+    0 0 5px rgba(0, 0, 0, 0.65);
+}
+
+.scale-panel-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  padding: 0 2px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+
+.scale-panel-close:hover {
+  color: #fff;
+}
+
+.scale-panel-slider {
+  width: 100%;
+  accent-color: var(--pink-500);
+}
+
+.scale-panel-value {
+  font-size: 12px;
+  color: #ffffff;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-shadow:
+    0 1px 8px rgba(0, 0, 0, 0.95),
+    0 0 4px rgba(0, 0, 0, 0.6);
+}
+
+/* ===== 自研边缘缩放区（透明窗 + 无边框，顶条已改手动拖拽不再是原生 drag 区） =====
+   命中带全部落在窗口内侧：此前写 top:-3px 之类，负偏移部分被 .chat-page 的
+   overflow:hidden + 28px 圆角裁掉，实际可命中只剩 ~4px 细边，顶部尤其难抓
+   。改为 inset:0 起、边带 7px / 角块 18px。 */
+
+.resize-zone {
+  position: absolute;
+  z-index: 40;
+}
+
+.resize-zone.n {
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.resize-zone.s {
+  bottom: 0;
+  left: 24px;
+  right: 24px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.resize-zone.e {
+  right: 0;
+  top: 24px;
+  bottom: 24px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.resize-zone.w {
+  left: 0;
+  top: 24px;
+  bottom: 24px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.resize-zone.ne {
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nesw-resize;
+}
+.resize-zone.nw {
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+}
+.resize-zone.se {
+  bottom: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+}
+.resize-zone.sw {
+  bottom: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nesw-resize;
+}
+
+/* ===== 设置页 · 工具白名单 ===== */
+
+.tool-roots-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.tool-root-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.tool-root-path {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-strong, #333);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.tool-root-remove {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-faint, #999);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.tool-root-remove:hover {
+  background: rgba(163, 45, 45, 0.1);
+  color: #a32d2d;
+}

@@ -1,0 +1,126 @@
+{
+  "name": "aemeath-agent",
+  "version": "0.3.1-alpha",
+  "description": "Aemeath Agent —— 以《鸣潮》爱弥斯为主题的 Windows 桌面 AI 伴侣 Agent",
+  "main": "./out/main/index.js",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "lint": "eslint --cache .",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "dist": "npm run build:office && npm run build && electron-builder --win",
+    "test": "vitest run",
+    "build:office": "node scripts/build-office-runtime.mjs"
+  },
+  "build": {
+    "appId": "com.aemeath.agent",
+    "productName": "Aemeath Agent",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**",
+      "package.json",
+      "skills/**"
+    ],
+    "extraResources": [
+      {
+        "from": "personas",
+        "to": "personas"
+      },
+      {
+        "from": "resources",
+        "to": "resources"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/@playwright/mcp/**",
+      "node_modules/playwright/**",
+      "node_modules/playwright-core/**",
+      "node_modules/node-pty/**"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Aemeath Agent",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Aemeath-Agent-${version}-setup.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "taoser258",
+        "repo": "AemeathAgent"
+      }
+    ]
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@fontsource/maple-mono": "^5.3.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@playwright/mcp": "0.0.80",
+    "electron-updater": "^6.8.9",
+    "katex": "^0.18.5",
+    "lxgw-wenkai-screen-webfont": "^1.7.0",
+    "node-pty": "^1.1.0",
+    "openai": "^7.10.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@electron-toolkit/eslint-config-prettier": "^3.0.0",
+    "@electron-toolkit/eslint-config-ts": "^3.1.0",
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@types/node": "^22.19.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "docx": "^9.7.1",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "exceljs": "^4.4.0",
+    "pptxgenjs": "^4.0.1",
+    "prettier": "^3.7.4",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6",
+    "vitest": "^5.0.0"
+  }
+}

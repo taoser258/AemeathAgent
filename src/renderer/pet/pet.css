@@ -1,0 +1,72 @@
+/* 桌宠窗样式。
+   注意：此页不引 global.css —— 桌宠窗需要 body 完全透明（透明窗三件套之一），
+   也不该被主窗的全局背景/字体规则影响，所以用到的变量在这里就地定义。
+   - 拖拽是手动实现（指针事件 + IPC，见 pet/index.tsx）：原生 -webkit-app-region: drag
+     会把右键吞成 Windows 系统菜单，自定义右键菜单收不到事件
+   - 立绘阴影用 CSS filter: drop-shadow() 自绘（系统阴影对透明窗无效） */
+
+:root {
+  --pet-font-size: 13px;
+  --pet-radius: 10px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+.pet-root {
+  position: relative;
+  height: 100%;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.pet-root:active {
+  cursor: grabbing;
+}
+
+.pet-art {
+  width: 100%;
+  display: block;
+  /* 桌宠周围全透明，不加任何阴影/光晕。
+     原 drop-shadow(0 6px 14px rgba(0, 0, 0, 0.28)) 在浅色壁纸上会显成一圈灰色光晕，已移除。 */
+}
+
+.pet-bubble {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 92%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border-radius: var(--pet-radius);
+  background: rgba(255, 255, 255, 0.94);
+  color: #443c4a;
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: var(--pet-font-size);
+  line-height: 1.45;
+  word-break: break-word;
+  pointer-events: none; /* 气泡不挡拖拽 */
+  animation: pet-bubble-in 160ms ease-out;
+}
+
+@keyframes pet-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

@@ -1,0 +1,44 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+
+# secrets：apiKey 只经 safeStorage 存 userData/config/secrets.bin，绝不入库（红线③）
+secrets.bin
+**/secrets.bin
+
+# userData 运行数据兜底（实际存放于系统 AppData；会话/配置/checkpoint）
+userData/
+checkpoint/
+
+# electron-vite dev 运行期临时配置产物
+electron.vite.config.*.mjs
+
+# 表情包素材（146MB 二进制，不进仓库；分发时随安装包 extraResources 注入）
+resources/stickers/
+secrets.json
+**/secrets.json
+
+# 构建产物（electron-vite 默认输出 + safe-delete 拦截时的暂存目录）
+out/
+out.trash-*/
+
+# 打包产物（electron-builder）
+release*/
+
+# TS 增量编译缓存
+*.tsbuildinfo
+
+# CDP 探针临时截图（实测产物，不入库）
+pelican-check-*.png
+snake-*.png
+
+# Office 运行时 bundle（scripts/build-office-runtime.mjs 构建产物，不入库）
+resources/office/office-runtime.cjs
+
+# ── 开发过程文档，仅留本地、不进仓库 ──
+# docs/：设计/验收/调研等过程文档；DEVLOG.md：逐日开发日志。文件留在工作目录，不进 git
+docs/
+DEVLOG.md

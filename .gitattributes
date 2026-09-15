@@ -1,0 +1,18 @@
+# 行尾根治：全仓库统一 LF。
+# 历史坑：core.autocrlf=true 会把工作区转 CRLF，切分支/批量编辑后
+# lint 爆上千 Delete ␍；本文件落定后，工作区行尾不再随 autocrlf 漂移。
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF（cmd 解析器要求）
+*.bat text eol=crlf
+
+# 二进制资产（防止任何文本启发式误伤）
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.7z binary
+*.woff binary
+*.woff2 binary

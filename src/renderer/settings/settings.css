@@ -1,0 +1,1013 @@
+/* ★ 顺序铁律：必须 @import 内联 global，不能再靠入口 JS import——
+   打包器把共享的 global.css 拆成独立 chunk 并排在后面，dev（import 序）却是 global 在前，
+   两个环境同名规则的赢家相反（装机版设置页会变成 global 的旧卡片样式）。@import 内联后
+   global 永远在本文件之前，打包策略改不了。 */
+@import '../styles/global.css';
+
+/* ===== MCP 服务器分区 ===== */
+
+.mcp-draft {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mcp-draft .settings-input {
+  width: 100%;
+}
+
+/* ===== MCP ：模板 / 字段标签 / 环境变量行 / 测试结果 ===== */
+
+.mcp-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* 带标签的字段（原来只有 placeholder，用户看不出这格是干嘛的） */
+.mcp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mcp-field > span:first-child {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.mcp-field-hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* 工作目录 + 超时并排 */
+.mcp-row-2 {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 10px;
+}
+
+.mcp-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.mcp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* 环境变量行：变量名窄、值宽、后面跟开关与操作 */
+.mcp-env-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-env-row .mcp-env-key {
+  width: 190px;
+  flex-shrink: 0;
+}
+
+/* 测试结果：成功/失败两种底色，一眼可辨 */
+.mcp-result {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.mcp-result.ok {
+  background: rgba(46, 160, 67, 0.1);
+  border: 1px solid rgba(46, 160, 67, 0.35);
+  color: #1a7f37;
+}
+
+.mcp-result.bad {
+  background: rgba(207, 34, 46, 0.08);
+  border: 1px solid rgba(207, 34, 46, 0.35);
+  color: #b42318;
+}
+
+.mcp-result-tools {
+  margin-top: 4px;
+  font-family: var(--font-mono, 'Cascadia Code', Consolas, monospace);
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+
+/* ===== P3 顶部拖拽条：设置窗拖动只认顶条，正文文字恢复可选中 =====
+   ：从 app-region:drag 改为主窗同款手动拖拽（onPointerDown=startWindowDrag）——
+   无边框窗的 drag 不会"拖出即还原最大化"，且原生 drag 区吞其他命中。
+   顶条不再需要几何避开右上角窗控：按钮在 z-index 更高层，点击照常（无 app-region 后
+   原生命中问题不存在）。 */
+.settings-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 42px;
+  z-index: 9;
+  cursor: default;
+}
+
+/* ===== 个人信息分区 ===== */
+
+/* 头像预览：与侧栏左下角同尺寸（28px），所见即所得 */
+.settings-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--line-strong);
+  flex-shrink: 0;
+}
+
+.settings-user-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(240, 103, 158, 0.16);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+/* 行内窄输入框：.settings-input 默认 width:100%，放进 .settings-actions 横排会撑爆 */
+.settings-input-inline {
+  width: 220px;
+}
+
+/* 多行自述：默认 height 由 rows 决定，但允许用户自己往下拉 */
+.settings-textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* ===== 外观分区：主题三选一卡片 ===== */
+
+.appearance-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.appearance-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 200px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.appearance-option:hover {
+  border-color: var(--accent);
+}
+
+.appearance-option.active {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-control-focus);
+}
+
+.appearance-option-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.appearance-option-label {
+  font-size: 14px;
+  color: var(--text-strong);
+}
+
+.appearance-option-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.appearance-option-check {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+/* ── 账本条目：点击展开详情────────── */
+.ledger-row-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-row-toggle:hover .profile-name {
+  color: var(--accent, #f0679e);
+}
+
+.ledger-detail {
+  padding: 10px 12px;
+  margin-top: 10px;
+  border-top: 1px dashed var(--settings-border, rgba(128, 128, 128, 0.2));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ledger-detail-line {
+  display: flex;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ledger-detail-k {
+  flex-shrink: 0;
+  width: 64px;
+  opacity: 0.6;
+}
+
+.ledger-detail-v {
+  word-break: break-all;
+}
+
+.ledger-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.ledger-detail-hint {
+  font-size: 11.5px;
+  opacity: 0.55;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   设置窗口视觉统一
+   根因：组件大量使用 .settings-btn / .mcp-removed，但 CSS 里从未定义
+   （global.css 只有 .settings-button）→ 按钮全部裸奔成浏览器原生样式。
+   这里补齐缺失类 + 统一节奏：圆角（卡片12/输入8/按钮胶囊）、间距（卡片20/行12）、
+   字号层级（标题15/正文13/辅助12）、hover 与聚焦环。全部走主题变量，明暗自适配。
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── 按钮：对齐 .settings-button 的胶囊语言，补 btn 拼写与变体 ── */
+.settings-btn {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 5px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background 140ms ease;
+}
+
+.settings-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.settings-btn:active {
+  transform: translateY(0.5px);
+}
+
+/* 危险动作（删除）：默认弱化，hover 才亮红——避免满屏红按钮 */
+.settings-btn.danger {
+  color: var(--text-secondary);
+}
+
+.settings-btn.danger:hover {
+  border-color: #e53935;
+  color: #e53935;
+  background: rgba(229, 57, 53, 0.06);
+}
+
+/* ── 输入控件：统一圆角与聚焦环 ── */
+.settings-input,
+.settings-select,
+.settings-textarea,
+.settings-input-inline {
+  border-radius: 8px;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.settings-input:focus,
+.settings-select:focus,
+.settings-textarea:focus,
+.settings-input-inline:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.settings-textarea {
+  line-height: 1.65;
+  resize: vertical;
+  min-height: 120px;
+}
+
+/* ── 卡片：head 图标统一底座，行间距节奏 ── */
+.settings-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.settings-card-title {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.settings-card-desc {
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.settings-row {
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-row-label {
+  font-size: 13px;
+}
+
+.settings-hint {
+  line-height: 1.65;
+}
+
+/* ── 侧栏：图标与文字对齐、active 态更清晰 ── */
+.settings-nav-item {
+  gap: 10px;
+}
+
+.settings-nav-foot {
+  letter-spacing: 0.02em;
+}
+
+/* ── 页头：标题与副标题层级 ── */
+.settings-page-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.settings-page-sub {
+  font-size: 12.5px;
+}
+
+/* ── MCP：已删除内置项的找回区块（此前无样式）── */
+.mcp-removed {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
+
+/* ── 滚动条：细且低调 ── */
+.settings-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.settings-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-primary) 14%, transparent);
+  border-radius: 999px;
+}
+
+.settings-body::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-primary) 24%, transparent);
+}
+
+/* ── 账本行容器：配合内部 button 铺满 ── */
+.ledger-row .ledger-row-toggle {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   设置窗口排版 v2：全分区统一设计系统
+   原则：内容列定宽居中、卡片 head 分区、行改两栏 grid（副文本不再挤压控件）、
+   长路径换行而非撑爆、按钮组独立不换行挤压、全部走主题变量。
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── 骨架：内容列定宽居中（宽窗下表单不无限拉伸，阅读更舒适）── */
+.settings-body {
+  padding: 26px 34px 46px;
+}
+
+.settings-body > .settings-page-title,
+.settings-body > .settings-page-sub,
+.settings-body > .settings-card {
+  max-width: 780px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.settings-page-title {
+  font-size: 18px;
+}
+
+.settings-page-sub {
+  margin-bottom: 20px;
+}
+
+/* ── 卡片：呼吸感 + head 与正文分区线 ── */
+.settings-card {
+  padding: 22px 26px;
+  margin-bottom: 16px;
+  border-radius: 14px;
+}
+
+.settings-card-head {
+  gap: 14px;
+  padding-bottom: 14px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  font-size: 19px;
+}
+
+.settings-card-title {
+  font-size: 15px;
+}
+
+.settings-card-desc {
+  font-size: 12.5px;
+  line-height: 1.65;
+  margin-top: 3px;
+}
+
+/* ── 行：两栏 grid（label+说明 左，控件 右），副文本不再挤压控件 ── */
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 28px;
+  align-items: center;
+  padding: 15px 0;
+}
+
+.settings-row-label {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.settings-row-sub {
+  font-size: 12px;
+  line-height: 1.65;
+  margin-top: 4px;
+}
+
+.settings-actions {
+  margin: 0;
+  gap: 8px;
+  align-items: center;
+  justify-self: end;
+  flex-wrap: wrap;
+}
+
+.settings-input-inline {
+  width: 240px;
+}
+
+.settings-field {
+  margin-top: 18px;
+}
+
+/* ── 输入文字颜色（global 里 settings-input 尾部把 color 覆盖成了 accent，回正文色）── */
+.settings-input,
+.settings-select,
+.settings-textarea,
+.settings-input-inline {
+  color: var(--text-primary);
+}
+
+/* ── profile 行（模型档案 / MCP 服务器共用）：长路径换行、按钮组独立不挤压 ── */
+.settings-body .profile-row {
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-start;
+}
+
+.settings-body .profile-row .profile-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-body .profile-row .profile-name,
+.settings-body .profile-row .profile-meta {
+  word-break: break-all;
+  line-height: 1.55;
+}
+
+.settings-body .profile-row .profile-meta {
+  margin-top: 3px;
+}
+
+.settings-body .profile-row .profile-actions {
+  margin: 0;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── 徽标：与标题的间距统一 ── */
+.settings-badge {
+  vertical-align: 1px;
+  margin-left: 6px;
+}
+
+/* ── 外观主题选项：hover 轻抬 ── */
+.appearance-option {
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.appearance-option:hover {
+  transform: translateY(-1px);
+}
+
+/* ── 窄窗降级：行上下堆叠 ── */
+@media (max-width: 720px) {
+  .settings-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-actions {
+    justify-self: start;
+  }
+}
+
+/* ── v2 补刀：徽标不竖排、路径显示完整（换行而非截断省略）── */
+.settings-badge {
+  white-space: nowrap;
+}
+
+.settings-body .profile-row .profile-name {
+  white-space: normal;
+}
+
+.settings-body .profile-row .profile-meta {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   设置窗口 v3：移植成熟桌宠界面的设计语言（浅色粉白版）
+   昔淡源码实测：每行独立玻璃条（radius18 + 白5.5%底 + 粉13%边 + inset高光）、
+   行间 grid gap12、面板 radius24 + 氛围渐变、子分组容器 radius16。
+   翻译到我们的浅色主题：玻璃条 = 白底 + 粉边框 + 微阴影；氛围光 = 极淡粉紫。
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── 氛围光：实测会触发 global.css 的 deco 装饰层在设置窗渲染成浓紫底——撤销。
+   浅色主题的高级感来自干净白底 + 粉色玻璃细节。显式压回 --bg-base（deco 层
+   原本被 body 白底盖住，shell 自带背景就会把它们放出来）。── */
+.settings-shell {
+  background: var(--bg-base);
+}
+
+/* ── 每一行 = 独立玻璃条（v2 的 grid 布局保留，加皮肤）── */
+.settings-row {
+  padding: 13px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.03);
+  margin-bottom: 10px;
+}
+
+.settings-row:last-of-type {
+  margin-bottom: 0;
+}
+
+/* 行 hover 轻反馈 */
+.settings-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* ── 分组字段（"关于我"类 textarea 区）也是玻璃条 ── */
+.settings-field {
+  padding: 13px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.3);
+  margin-top: 10px;
+}
+
+.settings-field-label {
+  font-size: 13.5px;
+}
+
+/* ── 卡片面板：radius 20、更轻的边框（面板里已经是玻璃条，卡片做容器）── */
+.settings-card {
+  border-radius: 20px;
+  padding: 20px 22px;
+}
+
+/* head 与第一行之间留够呼吸 */
+.settings-card-head {
+  margin-bottom: 16px;
+}
+
+/* 提示文案：面板内弱化 */
+.settings-hint {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  margin-top: 12px;
+}
+
+/* ── 侧栏：active 胶囊化（对齐成熟实现的选中态）── */
+.settings-nav-item.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-weight: 500;
+}
+
+/* ── profile 行（模型/MCP）同款玻璃化 + 分隔感 ── */
+.settings-body .profile-row {
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 16px;
+  background: var(--bg-panel);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.3);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.settings-body .profile-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+/* 卡内子标题（如"工作模式目录"）与玻璃行的间距 */
+.settings-body .settings-field-label {
+  display: block;
+  margin: 14px 0 2px;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   v4：推翻"大卡片包裹"→ 成熟实现平铺式（分节标题直接坐镇 + 行条平铺）
+   成熟实现的外观页没有外层大白卡：页头 → 小节标题 → 一行行玻璃条直接铺在面板上。
+   我们此前 settings-card（白底大卡）套 settings-row（玻璃条）是"卡中卡"，
+   层级冗余。透明化外壳后，玻璃条本身就承担卡片角色。
+   ════════════════════════════════════════════════════════════════════ */
+
+.settings-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  margin-bottom: 30px;
+  border-radius: 0;
+}
+
+.settings-card-head {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 6px;
+  gap: 14px;
+}
+
+.settings-card-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  font-size: 22px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.settings-card-title {
+  font-size: 19px;
+}
+
+.settings-card-desc {
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+/* head 之后的第一行留一点空隙 */
+.settings-card > .settings-row:first-of-type {
+  margin-top: 12px;
+}
+
+/* ── 用量分区 ── */
+.usage-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.usage-stat {
+  padding: 16px 14px;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.3);
+  text-align: center;
+}
+
+.usage-num {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-cap {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+.usage-list-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin: 4px 0 10px;
+}
+
+.usage-tokens {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-size: 13px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+@media (max-width: 720px) {
+  .usage-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ── v5 补丁：textarea 拖拽手柄凸出圆角→ 禁用 resize ── */
+.settings-textarea {
+  resize: none;
+}
+
+/* ── v5 补丁：输入控件字体对齐主窗（global 里 settings-input 尾部把
+   font-family 覆盖成了等宽 Cascadia——与主窗文楷观感割裂）── */
+.settings-input,
+.settings-select,
+.settings-textarea,
+.settings-input-inline {
+  font-family: var(--font-body);
+  letter-spacing: 0.3px;
+}
+
+/* ── v5：用量条形图（输出分布）── */
+.usage-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.usage-bar-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 220px) 1fr 56px;
+  gap: 10px;
+  align-items: center;
+}
+
+.usage-bar-name {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f0679e, #a855f7);
+}
+
+.usage-bar-val {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 用量页：时间范围 chips + 趋势柱状图 + 按模型表格（学 DeepSeek usage，不含费用）── */
+.usage-range {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.usage-range-chip {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.usage-range-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* 柱状图：等宽列 + 底部对齐堆叠柱（浅=输入 / 深=输出） */
+.usage-chart {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  height: 150px;
+  padding: 10px 6px 4px;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+  margin-bottom: 16px;
+}
+
+.usage-chart-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.usage-chart-bar {
+  width: 62%;
+  max-width: 26px;
+  min-height: 1px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 4px 4px 2px 2px;
+  overflow: hidden;
+}
+
+/* 9.15：原 30% 透明在浅色卡片上几乎与底色同色→ 提到 55%，
+   并给输入段加一圈描边，保证浅/深两套主题下都与底、与输出段可区分 */
+.usage-chart-in {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.usage-chart-out {
+  background: linear-gradient(180deg, #f0679e, #a855f7);
+}
+
+.usage-chart-label {
+  font-size: 9.5px;
+  color: var(--text-secondary);
+  margin-top: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+/* 按模型表格 */
+.usage-models {
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+
+.usage-models-head,
+.usage-models-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1.4fr) 0.5fr 0.7fr 0.7fr 1.3fr;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 14px;
+}
+
+.usage-models-head {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.usage-models-row {
+  border-top: 1px solid color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-models-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.usage-models-share {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ── 自动更新── */
+.settings-btn.primary {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+}
+.settings-btn.primary:hover {
+  filter: brightness(1.08);
+  color: #fff;
+}
+.settings-update-actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.settings-update-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  overflow: hidden;
+  margin: -6px 0 12px;
+}
+.settings-update-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 220ms ease;
+}

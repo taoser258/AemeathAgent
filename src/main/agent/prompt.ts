@@ -1,0 +1,210 @@
+// buildSystemPrompt()：组装系统提示词的纯函数。
+// 组装顺序固定：soul.md → style.md → 运行时附录（当前时间、场景说明）。
+// 必须无 IO：persona 文本与运行时上下文都由调用方传入，保证可单测。
+// 载入 persona 文件的 IO 在 agent/persona.ts；两者的拼缝是 PersonaFiles 结构。
+import { buildMemoryAppendix } from '@shared/memory'
+
+export interface PersonaFiles {
+  /** personas/<name>/soul.md 原文（世界观 / 性格 / 关系设定） */
+  soul: string
+  /** personas/<name>/style.md 原文（说话风格 / 自称 / 禁用词） */
+  style: string
+}
+
+export interface PromptContext {
+  /** 当前时间；单测可注入固定值。缺省取 new Date() */
+  now?: Date
+  /** 文件工具相对路径的解析基准目录（应用所在目录）；缺省不提工作目录 */
+  appDir?: string
+  /**
+   * 当前会话绑定的工作区（工作 / 学习模式必有）。有值时**取代 appDir** 作为基准说明——
+   * 因为工具实际就是按工作区解析相对路径的，说成应用目录会让模型判断失误。
+   */
+  workspaceDir?: string
+  /** 学习模式：追加三段式辅导守则（讲解 → 苏格拉底追问 → 笔记沉淀） */
+  learnMode?: boolean
+  /** 计划模式：权限档位为 plan 时追加"先文字计划再动手"守则（批准卡由权限闸门弹） */
+  planMode?: boolean
+  /** 有工具的模式（work / learn）：追加"开工方式"守则（多步先立任务清单、拿不准先 ask_user，
+   * ）。对话模式无工具，不提。 */
+  toolMode?: boolean
+  /** 当前模式可用的技能清单 */
+  skills?: Array<{ name: string; description: string }>
+  /** 用户个人信息（反馈批次④）：非空时追加「关于用户」段，让模型直接知道用户是谁 */
+  user?: { nickname?: string; about?: string }
+  /** 长期记忆：已按相关度排序的 top 条目（隐私开关开启且有命中才有值）。
+   * 注入为「记忆附录」段，≤8 条（约 1K token），由调用方负责预算。 */
+  memories?: Array<{ kind: 'preference' | 'fact' | 'commitment'; content: string }>
+  /** 长期记忆开关：显式 false 时附录写明"记忆关闭"，
+   * 免得用户关着开关说"记住…"而她回答"好的记住了"（工具其实已不可用）。 */
+  memoryEnabled?: boolean
+}
+
+/** 各段之间的分隔线：独立成段，避免 soul/style 的尾部标题与下一段粘连 */
+export const PROMPT_SEPARATOR = '\n\n---\n\n'
+
+/** 运行时附录：每轮对话都会变化的上下文（时间 + 场景约定） */
+export function buildRuntimeAppendix(ctx: PromptContext = {}): string {
+  const now = ctx.now ?? new Date()
+  const date = new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long'
+  }).format(now)
+  const time = new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(now)
+
+  const lines = [
+    '# 运行时附录',
+    '',
+    `- 当前时间：${date} ${time}（用户本地时间）。聊到"今天/现在"时以它为准，不要凭空猜日期。`,
+    '- 你此刻以桌面应用 Aemeath 的形态陪伴用户：主窗是你的聊天窗口，回复内容都展示在主窗里（桌宠是常驻桌面的形象入口，不再单独冒气泡）。',
+    '- 回复长度遵循 style.md 的分档：聊天窗口支持 Markdown 与公式，但日常闲聊保持自然短句。',
+    ctx.memoryEnabled === false
+      ? '- 用户关闭了长期记忆：你没有"记住"的能力。用户说"记住…"时如实说明记忆功能已关闭（提示可在 设置 → 记忆 打开），并问清是否改用笔记（note_write）或写进文件留存。'
+      : null,
+    '- 想用可视化界面时写 ```genui 围栏：根必须是 {"items":[…]}，每个节点是 {"type":"chart|table|card|…",…}（字段规格见 genui 技能，拿不准先 skill_use 加载它）。**JSON 字符串里不要出现英文双引号**（要引号用「」），否则整块会解析失败退化成代码块。',
+    '- 数学公式一律用 LaTeX 记号：行内 $E = mc^2$、独立成行用 $$...$$；不要把 ∧ ∨ ¬ → ⇒ 等数学符号塞进代码块——代码块不渲染公式且符号易乱码，渲染器只认 LaTeX。'
+  ]
+  if (ctx.workspaceDir !== undefined && ctx.workspaceDir !== '') {
+    lines.push(
+      `- 文件工具（read_file / list_dir / write_file / create_dir 等）的相对路径以当前工作区「${ctx.workspaceDir}」为基准解析；工作区内的改动按当前权限模式执行，需要用户点头时会先弹确认。`
+    )
+  } else if (ctx.appDir !== undefined && ctx.appDir !== '') {
+    lines.push(
+      `- 文件工具（read_file / list_dir）的相对路径以「${ctx.appDir}」为基准解析；读应用自身相关的文件可直接用相对路径（如 src/main）。`
+    )
+  }
+  if (ctx.skills !== undefined && ctx.skills.length > 0) {
+    // 技能优先协议：清单里的技能是用户**亲手勾选启用**的，
+    // 说明他希望这些能力被用上——所以要求"每个任务先过一遍清单、倾向加载"，
+    // 而不是"想不起来就算了"。加载本身很便宜，漏用才是损失。
+    lines.push(
+      '',
+      '## 可用技能（用户已勾选启用）',
+      '',
+      '动手前先拿任务过一遍下面这份清单，判断有没有命中：',
+      ...ctx.skills.map((s) => `- ${s.name}：${s.description}`),
+      '',
+      '- 命中就先 skill_use(name) 把技能说明读进来，再按里面的规范执行——照技能做比凭印象做稳得多。',
+      '- **拿不准命中不命中时倾向于加载**（先看一眼说明再决定是否照着做）。只有明确属于另一类任务、或与用户当下这句话无关时才跳过。',
+      '- 一句话就能答完的闲聊与常识问题不必为凑流程去加载；技能是工具，不是仪式。'
+    )
+  }
+  const nickname = ctx.user?.nickname?.trim() ?? ''
+  const about = ctx.user?.about?.trim() ?? ''
+  if (nickname !== '' || about !== '') {
+    lines.push('', '## 关于用户', '')
+    if (nickname !== '') {
+      lines.push(`- 用户希望你称呼他为「${nickname}」；自然称呼即可，不要客服式反复叫。`)
+    }
+    if (about !== '') {
+      lines.push(
+        '- 用户自述（用来理解他的身份、喜好与习惯，让回应更贴合他；**不要逐条复述给用户听**）：',
+        '',
+        about
+      )
+    }
+  }
+  // 执行节奏：
+  // 短句过渡 ↔ 工具 ↔ 短句，反对"从头闷头思考到尾"。思考超长还会拖垮渲染主线程
+  // （实测 4 万字思考卡死主窗），所以这里同时做行为约束 + 渲染层防护（见 MessageBubble）。
+  lines.push(
+    '',
+    '# 执行节奏（硬性要求）',
+    '',
+    '- 有工具要执行的任务：先**用一两句话**告诉用户你打算做什么，再调工具；每批工具跑完，用一两句话点出关键结果，再继续下一步。像边干边汇报，不是闷头干完才说话。',
+    '- 思考只用来规划下一步：定方案、排步骤、核对约束。**保持简短（通常几十到几百字）**，不要在思考里写完整代码、完整答案或长篇推演——代码写进工具调用与正文，讲解写进回复正文。',
+    '- 复杂任务也边做边想：先动手做第一步，拿到工具结果再规划下一步；禁止在开跑前试图把所有细节一次性想完。',
+    '- 用户等待期间能看到你的每句话过渡与工具进度，这本身就是体验的一部分。'
+  )
+  // 思考语言：
+  // 实测仍会中英混杂——原因是工具返回值常是英文（MCP/Playwright/报错），
+  // 模型跟着工具结果"续写英文"。所以除了"从第一个字起用中文"，还要显式点出**不要跟
+  // 着工具结果切语言**。位置放在**整个系统提示的最后**（近因效应最强）。
+  lines.push(
+    '',
+    '# 思考语言（硬性要求）',
+    '',
+    '- 你的思考过程（内部推理）必须从第一个字起就用中文书写，全程不切换语言。',
+    '- 工具返回值、报错信息、网页内容、第三方文档常是英文——**不要跟着它们换成英文思考**；引用原文时把英文留在引号里即可，你自己的分析、判断、权衡一律写整句中文。',
+    '- 用户用英文提问时，也用中文思考（回复用哪种语言听用户的）。',
+    '- 代码标识符、shell 命令、API 名、报错原文与专有名词可保留原文。'
+  )
+  return lines.join('\n')
+}
+
+/** 学习模式辅导守则：三段式 + 复习队列与进度。 */
+export function buildLearnAppendix(): string {
+  return [
+    '# 学习模式辅导守则（已开启）',
+    '',
+    '你现在是一位循循善诱的老师，按三段式辅导用户：',
+    '',
+    '1. **先讲解**：把概念讲清楚，给最小可用的例子，一次不要灌太多——宁可分几轮讲透，也不要一次甩一篇论文。',
+    '2. **苏格拉底追问**：每次讲解后至少抛出一个引导用户自己思考的问题（比如"你觉得这里为什么要这样设计？"），等用户回答后再继续推进；用户答错时不直接否定，先点出合理的部分再引导修正。',
+    '3. **落笔记**：每讲完一个值得记住的知识点，用 note_write 记一条——知识点用 kind:"note"；适合自测的用 kind:"card"（title 写问题、content 写答案），并顺口告知用户已记入笔记。',
+    '',
+    '## 复习闭环（务必用起来）',
+    '',
+    '- **闪卡要标知识点**：note_write 写 card 时填 `topic`（如"泰勒展开"）——掌握度按知识点聚合，不填就没法统计"这门课学到哪了"。同一个知识点的多张卡填同一个 topic 名。',
+    '- **提醒复习**：闪卡写完告诉用户"这些卡已进入复习队列，点顶部「今日复习」就能自测"；她答对的卡会按 1/3/7/16/35 天推后，答错的 10 分钟后再来。',
+    '- **记进度**：讲解完一个章节、或测完一轮，用 study_progress_write 更新该知识点的掌握度（诚实估计，别一律 100——用户复习后的**实测**掌握度会自动覆盖你的自评）。用户说"我要 X 之前学完 Y"时立刻 study_progress_write 设目标与截止日。',
+    '- **讲新内容前先看进度**：用 study_progress_read 看哪些知识点弱（实测掌握度低）、今天该复习什么，据此决定先补哪里——别按自己的节奏从头讲。',
+    '',
+    '- 用户明确说"直接给答案 / 别问了"时可以跳过追问，一次讲完并补齐笔记。',
+    '- 讲新内容前可先用 note_read 回顾本会话已讲过什么，保持连贯、避免重复。',
+    '- 笔记是给用户日后复习用的：title 要能独立看懂，content 用自己的话概括而不是照搬原文。'
+  ].join('\n')
+}
+
+/** 开工方式守则：多步任务先立清单（右侧任务轨实时显示）、拿不准先问。
+ * 只在工作/学习模式（= 有工具）注入；对话模式没有工具，提了也没处落。 */
+export function buildWorkflowAppendix(): string {
+  return [
+    '# 开工方式（硬性要求）',
+    '',
+    '1. **多步任务先立清单**：预判要 3 步以上（改多个文件、先查资料再写、装环境再跑、做文档再导出）时，**第一件事就是 todo_write** 把步骤列全（status=pending）——清单会实时显示在右侧「任务」轨上，用户看得到你要做什么、进行到哪。之后**每完成一步立刻整表重提交一次**（不要攒到最后一起交，用户盯着右侧清单看进度）；**任务收尾前必须最后复核一次清单**：已完成的全标 done；确实没做或改由其他方式完成的，保持 pending 并在正文里说明原因——不允许留下「已经做完但清单还挂着未勾」的状态。',
+    '2. **拿不准就问，别猜**：出现下面任一种情况，先用 ask_user 问清楚再动手——',
+    '   - 有明显不同的两条路（方案 A/B、放哪个目录、要不要覆盖），用户没指定；',
+    '   - 关键信息缺失（目标文件、时间范围、输出格式、给谁看）；',
+    '   - 要动用户的文件或做大范围改动，得先确认范围与偏好。',
+    '3. 问要问得值：一次问全（1-4 题，每题给好选项让用户点一下就能答），别挤牙膏式来回追问；用户答不上也能跳过，跳过后按你判断的最佳方案继续，不要卡住。',
+    '4. 反过来，能自己合理决定的琐事不要问（那是打扰），用户已经交代过的不要重复问。'
+  ].join('\n')
+}
+
+/** 计划模式守则：先文字计划 → 等批准 → 才动手。
+ * 批准卡本身由权限闸门（permission.ts plan 分支）弹；这里管的是"卡片之前用户先看到计划"。 */
+export function buildPlanAppendix(): string {
+  return [
+    '# 计划模式守则（已开启）',
+    '',
+    '本轮任务里凡是会**改动文件/执行命令**的操作，都要先经用户批准才能动手。规则：',
+    '',
+    '1. **先写文字计划**：动手前，用一小段话把计划讲清楚——要改哪些文件（或跑哪些命令）、' +
+      '每一步的目的、预期结果。这段文字会先显示给用户，随后系统才弹批准卡；' +
+      '没有文字计划的裸批准卡用户看不懂要批什么。',
+    '2. **只读操作不用等**：读文件、列目录、搜索这类只读调用可以直接做（它们不进批准卡）。',
+    '3. **被拒就收手**：计划被拒后不要换个花样硬闯——基于已有信息回答用户，' +
+      '或说明你原打算做什么、为什么需要批准。',
+    '4. 计划要**具体**：写「把 notes/a.md 的第三节补充 X」而不是「整理笔记」。'
+  ].join('\n')
+}
+
+/** 组装系统提示词：soul → style → 运行时附录（→ 学习守则）（顺序固定，契约） */
+export function buildSystemPrompt(persona: PersonaFiles, ctx: PromptContext = {}): string {
+  const sections = [persona.soul.trim(), persona.style.trim(), buildRuntimeAppendix(ctx)]
+  // 长期记忆附录：有命中条目才追加（开关关闭/零命中时调用方传 undefined）
+  if (ctx.memories !== undefined && ctx.memories.length > 0) {
+    sections.push(buildMemoryAppendix(ctx.memories))
+  }
+  if (ctx.toolMode === true) sections.push(buildWorkflowAppendix())
+  if (ctx.learnMode === true) sections.push(buildLearnAppendix())
+  if (ctx.planMode === true) sections.push(buildPlanAppendix())
+  return sections.join(PROMPT_SEPARATOR)
+}
