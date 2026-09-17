@@ -771,9 +771,15 @@
   border-radius: 3px;
 }
 
+/* 聊天里的图片缩略。
+   ★ max-width 里**不能写百分比**（实测踩到）：`min(220px, 100%)` 会让浏览器在计算
+   气泡的"内容宽度"时退回图片的 intrinsic 宽度（截图动辄上千 px），于是**带图的短消息
+   气泡被永远撑到 76% 上限**——owner 报的"这条气泡被拉得这么长"就是这个。
+   60vw 是确定值，既够稳又不参与 intrinsic 计算。 */
 .msg-image {
   display: block;
-  max-width: min(220px, 100%);
+  width: auto;
+  max-width: min(220px, 60vw);
   max-height: 220px;
   border-radius: 10px;
   margin-bottom: 4px;
@@ -1480,6 +1486,11 @@
   animation: usage-spin 1.2s linear infinite;
 }
 
+/* 超过档案窗口：进度环转警示红（人设+工具的固定占用压不掉时的明确信号，别让用户干看满环） */
+.usage-ring.over .usage-ring-val {
+  stroke: var(--danger);
+}
+
 @keyframes usage-spin {
   to {
     transform: rotate(360deg);
@@ -1501,7 +1512,9 @@
   align-items: center;
 }
 
-/* 悬停明细面板：鼠标放上环即弹出，无需点击（pointer-events:none 防移出闪烁） */
+/* 悬停明细面板：鼠标放上环即弹出，无需点击。
+   必须能点到里面的「压缩更早的对话」按钮：pointer-events 不能是 none，
+   并用 ::before 透明桥接住环与浮层之间 10px 间隙的 hover（owner 实测：鼠标半路移开浮层就收起，按钮永远点不到）。 */
 .usage-pop {
   position: absolute;
   bottom: calc(100% + 10px);
@@ -1513,7 +1526,17 @@
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(70, 50, 70, 0.18);
   z-index: 70;
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+/* 透明桥：浮层底边向下延伸盖住与环之间的间隙，鼠标移过去不会丢 hover */
+.usage-pop::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 12px;
 }
 
 .usage-pop-title {
@@ -1549,10 +1572,346 @@
   color: var(--accent);
 }
 
+.usage-pop-row.total.over b {
+  color: var(--danger);
+}
+
+/* 超限说明：固定占用压不掉，给可执行的下一步（调窗口/精简工具） */
+.usage-pop-note.over-hint {
+  color: var(--danger);
+  opacity: 0.85;
+}
+
 .usage-pop-note {
   margin-top: 8px;
   font-size: 11px;
   color: var(--text-faint);
+}
+
+/* 用量浮层里的手动压缩按钮（P8-T1）：浮层窄，按钮占满一行、别挤成一团 */
+.usage-pop-action {
+  margin-top: 10px;
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* ═ P8-T4：右键模型 → 思考强度滑条（观感向 Codex 看齐，配色走主题变量）══
+   定位要点（实测踩到）：模型列表 .model-switcher 也是 absolute、z-index 60，
+   面板若与之同位同层会被整个盖住（owner 反馈"右键没反应"就是这个）——
+   所以面板① 放到列表**左侧**并排 ② z-index 压过列表。 */
+.reasoning-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 296px;
+  width: 260px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--pill-border);
+  border-radius: 12px;
+  background: var(--bg-panel, #fff);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 18%);
+  z-index: 90;
+}
+
+.reasoning-pop-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong, #333);
+  margin-bottom: 10px;
+}
+
+.reasoning-pop-empty {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.reasoning-pop-note {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ═══ 思考强度滑条（1:1 对齐 ChatGPT/Codex effort selector）═══
+   结构：.rslider-row(38px 命中行，role=slider) > .rslider-track(28px 粗胶囊：刻度+填充)
+   + .rslider-knob(34px 白圆钮) + .rslider-burst(珠粒画布)。填充里的 .rslider-spark 是
+   白色粒子"能量流"；顶档 .rslider-ultra 粉紫渐变淡入；圆钮落定顶档瞬间从边缘爆一圈珠。
+   几何/弹簧/粒子常量取自官方复刻 zanwei/chatgpt-model-selector，别随手改比例。
+   颜色只用本块局部变量，浅深两套，符合「颜色走 CSS 变量」。 */
+.rslider {
+  /* 浅色主题局部色板 */
+  --rslider-track: #e9e5ee;
+  --rslider-tick: #c6bfd0;
+  --rslider-knob: #ffffff;
+  --rslider-ultra: linear-gradient(90deg, #f0679e 0%, #e578e0 48%, #b79ef5 100%);
+  --rslider-bead-a: #f7b6d6;
+  --rslider-bead-b: #e7a5f0;
+  --rslider-bead-c: #f9c6e0;
+  --rslider-bead-d: #c9b0f0;
+  /* 官方弹簧：约 4% 单次过冲、无二次振荡；老引擎不认 linear() 时上前一行贝塞尔兜底 */
+  --rslider-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --rslider-spring: linear(
+    0,
+    0.062 3.4%,
+    0.24 7.5%,
+    0.51 12.5%,
+    0.76 17.9%,
+    0.905 22.4%,
+    0.997 27.2%,
+    1.038 32.4%,
+    1.05 37.4%,
+    1.044 42.7%,
+    1.028 49.2%,
+    1.012 56.9%,
+    1.003 65.7%,
+    0.999 76%,
+    1
+  );
+  user-select: none;
+}
+:root[data-theme='dark'] .rslider {
+  --rslider-track: #3a3144;
+  --rslider-tick: #746a83;
+  --rslider-knob: #fdf8fd;
+  --rslider-ultra: linear-gradient(90deg, #f4a9ce 0%, #e093ee 48%, #b7a4f7 100%);
+  --rslider-bead-a: #fbcfe4;
+  --rslider-bead-b: #eeb8f7;
+  --rslider-bead-c: #fdd9eb;
+  --rslider-bead-d: #d6c2f7;
+}
+
+/* 当前模型名 · 档名（+ 预算说明）：整行居中（取代旧版拇指气泡：信息常驻，拖动时实时换） */
+.rslider-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  min-height: 16px;
+  margin-bottom: 7px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.rslider-cap-model {
+  font-size: 11px;
+  font-weight: 500;
+  /* 与档名同色（常态主题粉，顶档由 .peak 规则一并换成粉紫渐变） */
+  color: var(--accent);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 模型名与档名之间的分隔点（放 model 后面：顶档时档名被渐变裁剪，点不能放进档名盒） */
+.rslider-cap-model:not(:last-child)::after {
+  content: '·';
+  margin: 0 7px;
+  color: var(--accent);
+  opacity: 0.55;
+}
+.rslider-cap-name {
+  font-size: 11px;
+  font-weight: 700;
+  /* 与滑条填充、下方选中 chip 同色（顶档由 .peak 规则覆盖为粉紫渐变） */
+  color: var(--accent);
+}
+.rslider-cap-hint {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.rslider-cap-hint::before {
+  content: '·';
+  margin: 0 7px;
+}
+/* 顶档：模型名与档名一并用粉→紫渐变填字（官方 Ultra 的紫罗兰仪式感，换我们的粉）。
+   text-fill 显式打透才能让渐变在 -webkit 内核稳定生效 */
+.rslider-caption.peak .rslider-cap-name,
+.rslider-caption.peak .rslider-cap-model {
+  background: var(--rslider-ultra);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+/* 顶档分隔点取渐变中段色（伪元素无法跟文字一起裁剪） */
+.rslider-caption.peak .rslider-cap-model::after {
+  color: #c98ae0;
+  opacity: 1;
+}
+
+/* 命中行：整条都可拖 */
+.rslider-row {
+  position: relative;
+  height: 38px;
+  cursor: grab;
+  touch-action: none;
+  outline: none;
+}
+.rslider.dragging .rslider-row {
+  cursor: grabbing;
+}
+.rslider-row:focus-visible::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  top: 3px;
+  bottom: 3px;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* 28px 粗胶囊轨道 */
+.rslider-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  translate: 0 -50%;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--rslider-track);
+  overflow: hidden; /* 刻度与粒子都被填充段/胶囊边缘裁切 */
+}
+
+/* 5px 小灰刻度，排在填充之前的 DOM → 填充段会盖住左侧刻度（官方同款） */
+.rslider-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.rslider-tick {
+  position: absolute;
+  top: 50%;
+  translate: -50% -50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--rslider-tick);
+}
+
+/* 填充：与轨道同高的实心胶囊，末端正好盖到圆钮右缘 */
+.rslider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  overflow: hidden;
+}
+/* 顶档渐变层：300ms 淡入到实心粉之上 */
+.rslider-ultra {
+  position: absolute;
+  inset: 0;
+  background: var(--rslider-ultra);
+  opacity: 0;
+  transition: opacity 300ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.rslider.peak .rslider-ultra {
+  opacity: 1;
+}
+/* 白色粒子能量流画布（JS 按整条轨道尺寸铺底，被 fill 裁在填充段里） */
+.rslider-spark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* 34px 纯白圆钮：只靠柔和阴影浮起，无描边无光晕；拖动仅放到 1.06。
+   深层投影放 ::after 用 opacity 切换——直接动画 box-shadow 拖动时每帧重绘。 */
+.rslider-knob {
+  position: absolute;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--rslider-knob);
+  translate: -50% -50%;
+  scale: 1;
+  box-shadow:
+    0 0 0 0.5px rgba(26, 29, 33, 0.03),
+    0 1px 2px rgba(26, 29, 33, 0.1),
+    0 2px 6px rgba(26, 29, 33, 0.14);
+  transition: scale 140ms cubic-bezier(0.32, 0.72, 0, 1);
+  pointer-events: none; /* 命中统一走 row，圆钮不拦截拖拽 */
+  z-index: 2;
+}
+.rslider-knob::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  box-shadow:
+    0 2px 3px rgba(26, 29, 33, 0.1),
+    0 4px 10px rgba(26, 29, 33, 0.14);
+  opacity: 0;
+  transition: opacity 140ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.rslider.dragging .rslider-knob {
+  scale: 1.06;
+}
+.rslider.dragging .rslider-knob::after {
+  opacity: 1;
+}
+/* 吸附：只有松手/点选后的 380ms 开 left/width 弹簧；拖动中无过渡才跟手 */
+.rslider.snap .rslider-knob {
+  transition:
+    left 380ms var(--rslider-spring),
+    scale 140ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.rslider.snap .rslider-fill {
+  transition: width 380ms var(--rslider-spring);
+}
+
+/* 顶档珠粒庆祝画布（JS 按行高+边距定尺寸），绝不拦截输入 */
+.rslider-burst {
+  position: absolute;
+  left: -32px;
+  top: -40px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* 档位名：可点选；当前档只染主题色加粗，不做常驻药丸底（克制，让圆钮当主角） */
+.rslider-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding: 0 3px;
+}
+.rslider-scale-item {
+  border: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.rslider-scale-item:hover {
+  color: var(--text-secondary);
+  background: var(--accent-soft);
+}
+.rslider-scale-item.on {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* 尊重系统「减少动态效果」：弹簧/粒子循环/珠粒全部由 JS 配合关闭，这里兜底过渡时长 */
+@media (prefers-reduced-motion: reduce) {
+  .rslider *,
+  .rslider *::before,
+  .rslider *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
 
 /* 输入框下方实时监测栏 */
@@ -3389,6 +3748,27 @@
   flex-shrink: 0;
   color: var(--text-faint);
   font-size: 12px;
+}
+
+/* 产出文件卡片的「展开其余 N 个」按钮：与卡片同排，弱化为文字链 */
+.msg-file-cards-more {
+  appearance: none;
+  border: 1px dashed var(--line-strong);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 9px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.msg-file-cards-more:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
 }
 
 /* 预览头部：渲染/源码切换（md 默认渲染视图） */

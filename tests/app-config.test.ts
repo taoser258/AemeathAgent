@@ -87,6 +87,109 @@ describe('settings/app-config', () => {
     expect(next2.tools.visibility).toEqual({ work: ['current_time'], learn: ['note_read'] })
   })
 
+  it('聊天行为（P8-T1）：自动压缩缺省开；只有显式 false 才关；patch 只改这一项', () => {
+    expect(mergeAppConfig({}).chat.autoCompact).toBe(true)
+    expect(
+      mergeAppConfig({ chat: { autoCompact: 'x' as unknown as boolean } }).chat.autoCompact
+    ).toBe(true)
+    expect(mergeAppConfig({ chat: { autoCompact: false } }).chat.autoCompact).toBe(false)
+    const next = applySettingsPatch(mergeAppConfig({}), { chat: { autoCompact: false } })
+    expect(next.chat.autoCompact).toBe(false)
+    expect(applySettingsPatch(next, { chat: { autoCompact: true } }).chat.autoCompact).toBe(true)
+    // 不传 chat 的 patch 不动它
+    expect(applySettingsPatch(next, { ui: { notesCard: true } }).chat.autoCompact).toBe(false)
+  })
+
+  it('视觉档案（P8-T3）：缺省自动；脏值回退自动；patch 只改这一项、不动档案表', () => {
+    expect(mergeAppConfig({}).model.visionProfileId).toBe('')
+    expect(mergeAppConfig({ model: { visionProfileId: ' p-claude ' } }).model.visionProfileId).toBe(
+      'p-claude'
+    )
+    expect(
+      mergeAppConfig({ model: { visionProfileId: 42 as unknown as string } }).model.visionProfileId
+    ).toBe('')
+    const base = mergeAppConfig({})
+    const next = applySettingsPatch(base, { model: { visionProfileId: 'off' } })
+    expect(next.model.visionProfileId).toBe('off')
+    expect(next.model.profiles).toEqual(base.model.profiles) // 档案表未被顺手改写
+    expect(next.model.activeId).toBe(base.model.activeId)
+  })
+
+  it('档案新字段（P8-T4）：输出上限与思考档位被保留；脏值丢弃；缺省即"没有"', () => {
+    const merged = mergeAppConfig({
+      model: {
+        profiles: [
+          {
+            id: 'p1',
+            name: '甲',
+            protocol: 'anthropic',
+            baseUrl: 'https://api.anthropic.com',
+            model: 'claude',
+            context: 200000,
+            maxOutput: 32000,
+            multimodal: false,
+            reasoningEffort: 'xhigh',
+            reasoningLevels: ['low', 'xhigh', '不是档位']
+          }
+        ],
+        activeId: 'p1'
+      }
+    })
+    const p = merged.model.profiles.find((x) => x.id === 'p1')
+    expect(p?.maxOutput).toBe(32000)
+    expect(p?.reasoningEffort).toBe('xhigh')
+    expect(p?.reasoningLevels).toEqual(['low', 'xhigh'])
+    // 旧配置（没有这些字段）读出来不炸，且不会凭空造出字段
+    const legacy = mergeAppConfig({ model: { baseUrl: 'https://x/v1', model: 'm' } })
+    expect(legacy.model.profiles[0].reasoningLevels).toBeUndefined()
+    expect(legacy.model.profiles[0].maxOutput).toBeUndefined()
+    // 脏值：非正数上限丢弃、非法档位丢弃
+    const dirty = mergeAppConfig({
+      model: {
+        profiles: [
+          {
+            id: 'p2',
+            baseUrl: 'https://x/v1',
+            model: 'm',
+            context: 0,
+            maxOutput: -1,
+            reasoningEffort: '超级高',
+            reasoningLevels: 'low'
+          }
+        ],
+        activeId: 'p2'
+      }
+    })
+    const q = dirty.model.profiles.find((x) => x.id === 'p2')
+    expect(q?.maxOutput).toBeUndefined()
+    expect(q?.reasoningEffort).toBeUndefined()
+    expect(q?.reasoningLevels).toBeUndefined()
+  })
+
+  it('P9-T1 思考参数风格：合法值保留，脏值丢弃（=自动识别），旧配置不凭空造字段', () => {
+    const merged = mergeAppConfig({
+      model: {
+        profiles: [
+          {
+            id: 'p1',
+            baseUrl: 'https://api.deepseek.com/v1',
+            model: 'm',
+            reasoningAdapter: 'deepseek'
+          },
+          { id: 'p2', baseUrl: 'https://x/v1', model: 'm', reasoningAdapter: 'bytedance' },
+          { id: 'p3', baseUrl: 'https://x/v1', model: 'm', reasoningAdapter: 42 }
+        ],
+        activeId: 'p1'
+      }
+    })
+    expect(merged.model.profiles.find((x) => x.id === 'p1')?.reasoningAdapter).toBe('deepseek')
+    expect(merged.model.profiles.find((x) => x.id === 'p2')?.reasoningAdapter).toBeUndefined()
+    expect(merged.model.profiles.find((x) => x.id === 'p3')?.reasoningAdapter).toBeUndefined()
+    // 旧配置无该字段
+    const legacy = mergeAppConfig({ model: { baseUrl: 'https://x/v1', model: 'm' } })
+    expect(legacy.model.profiles[0].reasoningAdapter).toBeUndefined()
+  })
+
   it('技能禁用名单：去重去空白；脏值回退空（全启用）；patch 整表替换', () => {
     const merged = mergeAppConfig({ skills: { disabled: [' a ', 'a', 'b', 42] } })
     expect(merged.skills.disabled).toEqual(['a', 'b'])
@@ -151,6 +254,8 @@ describe('settings/app-config · T4 模型档案（只增不改）', () => {
       'p-qwen',
       'p-kimi',
       'p-doubao',
+      'p-mimo',
+      'p-minimax',
       'p-claude',
       'p-gemini'
     ])

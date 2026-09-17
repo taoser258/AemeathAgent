@@ -346,6 +346,10 @@ function ChatPage(): React.JSX.Element {
     sync()
     return window.petAPI.onSettingsChanged(sync)
   }, [])
+  // 主窗 will-navigate 兜底：漏网外链（非 Markdown 渲染的链接）也进侧栏浏览器
+  useEffect(() => {
+    return window.petAPI.onOpenLink((url) => useChatStore.getState().openRightLink(url))
+  }, [])
   useEffect(() => {
     if (loaded && !hasSession) createSession()
   }, [loaded, hasSession, createSession])

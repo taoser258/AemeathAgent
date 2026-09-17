@@ -3,11 +3,19 @@
 // 左侧按钮：＋ 上传本地文件（主进程原生对话框+读取）、☺ 表情包面板（sticker:// 协议）。
 
 import { useEffect, useMemo, useState } from 'react'
-import type { ChatAttachmentPayload, ModelProfile } from '@shared/types'
+import type { ChatAttachmentPayload, ModelProfile, ReasoningEffort } from '@shared/types'
+import {
+  REASONING_LEVELS,
+  planReasoning,
+  reasoningDetail,
+  reasoningSummary
+} from '@shared/reasoning'
+import { resolveReasoningAdapter } from '@shared/reasoning-adapters'
 import { boundWorkspace, modeLabel, modeNeedsWorkspace } from '@shared/workspace'
 import { useChatStore, selectStreamingActive, type ChatMessage } from './store'
 import PermissionButton from './PermissionButton'
 import WorkspaceButton from './WorkspaceButton'
+import ReasoningSlider from './ReasoningSlider'
 
 const NO_MESSAGES: ChatMessage[] = []
 
@@ -15,9 +23,22 @@ const NO_MESSAGES: ChatMessage[] = []
 type LocalAtt = ChatAttachmentPayload & { id: string }
 
 const MAX_ATTACHMENTS = 8
+/** 与主进程 file-pick.ts 同口径：图片超过 6MB 不发 dataUrl */
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 
 function newAttId(): string {
   return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+/** 剪贴板 File → 附件契约（dataUrl 走 FileReader；渲染层只处理粘贴这一入口，
+ * 文件选择仍走主进程原生对话框，见 main/file-pick.ts） */
+function readImageAsDataUrl(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null)
+    reader.onerror = () => resolve(null)
+    reader.readAsDataURL(file)
+  })
 }
 
 /** token 数格式化：1000→1.0K，1e6→1.0M（对齐 成熟实现的显示习惯） */
@@ -37,14 +58,23 @@ function fmtDur(ms: number): string {
 }
 
 /** 上下文用量环：14px 小环 + 成熟风格文字（环只是指示，数字才是主角） */
-function UsageRing({ ratio, busy }: { ratio: number; busy: boolean }): React.JSX.Element {
+function UsageRing({
+  ratio,
+  busy,
+  over
+}: {
+  ratio: number
+  busy: boolean
+  /** 真实占用已超过档案窗口（压缩也救不了，多为窗口填太小/固定占用过高）→ 警示红 */
+  over: boolean
+}): React.JSX.Element {
   const size = 14
   const r = 5
   const c = 2 * Math.PI * r
   const clamped = Math.min(1, Math.max(0, ratio))
   return (
     <svg
-      className={busy ? 'usage-ring busy' : 'usage-ring'}
+      className={`usage-ring${busy ? ' busy' : ''}${over ? ' over' : ''}`}
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
@@ -60,6 +90,7 @@ function UsageRing({ ratio, busy }: { ratio: number; busy: boolean }): React.JSX
         strokeWidth="2.5"
       />
       <circle
+        className="usage-ring-val"
         cx={size / 2}
         cy={size / 2}
         r={r}
@@ -70,7 +101,7 @@ function UsageRing({ ratio, busy }: { ratio: number; busy: boolean }): React.JSX
         strokeDasharray={c}
         strokeDashoffset={c * (1 - clamped)}
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        style={{ transition: 'stroke-dashoffset 240ms ease' }}
+        style={{ transition: 'stroke-dashoffset 240ms ease, stroke 160ms ease' }}
       />
     </svg>
   )
@@ -85,6 +116,8 @@ function ChatInput(): React.JSX.Element {
   const stop = useChatStore((s) => s.stop)
   const nudge = useChatStore((s) => s.nudge)
   const chatMode = useChatStore((s) => s.chatMode)
+  /** 当前会话 id（手动压缩要按会话走；与模型档案 id 区分开，别混用） */
+  const sessionId = useChatStore((s) => s.activeId)
   // 当前会话消息（上下文用量估算用）
   const activeMessages = useChatStore((s) =>
     s.activeId === null ? NO_MESSAGES : (s.messagesBySession[s.activeId] ?? NO_MESSAGES)
@@ -185,12 +218,120 @@ function ChatInput(): React.JSX.Element {
       conv: convTokensEst
     }
   }, [realUsage, personaTokens, convTokensEst, contextCap])
+  /** 真实占用已超过档案窗口（压缩也救不了的场景，环/浮层给警示态） */
+  const overCap = contextCap > 0 && usage.used > contextCap
   const [usageOpen, setUsageOpen] = useState(false)
+  /** 手动压缩（P8-T1）进行中（一次摘要调用，按秒计） */
+  const [compacting, setCompacting] = useState(false)
+  /** 右键模型弹出的「思考强度」菜单（P8-T4）：null = 未开 */
+  const [reasoningMenu, setReasoningMenu] = useState<string | null>(null)
+
+  const menuProfile =
+    reasoningMenu === null ? undefined : profiles.find((p) => p.id === reasoningMenu)
+  /** 菜单里的可选档位 = 「自动（不注入）」+ 该档案勾选的档位；
+   *  空 = 没开思考（菜单给指路而不是空滑条）。
+   *  '自动'必须作为最左一档存在——否则默认档（default）会被 indexOf 回退成「低」，
+   *  用户会以为"正在注入低强度"，而实际是"不注入"（实测踩到过）。 */
+  const menuLevels: ReasoningEffort[] =
+    menuProfile === undefined || (menuProfile.reasoningLevels ?? []).length === 0
+      ? []
+      : [
+          'default',
+          ...(menuProfile.reasoningLevels ?? []).filter((l) => REASONING_LEVELS.includes(l))
+        ]
+
+  /** 当前右键菜单档案的思考参数风格（P9-T1：手动覆盖优先，否则按 Base URL 识别） */
+  const menuAdapter =
+    menuProfile !== undefined && menuProfile.protocol === 'openai'
+      ? resolveReasoningAdapter({
+          baseUrl: menuProfile.baseUrl,
+          ...(menuProfile.reasoningAdapter !== undefined
+            ? { override: menuProfile.reasoningAdapter }
+            : {})
+        })
+      : undefined
+
+  /** 档位 → 预算说明（与设置页/协议实现同源；只给 tokens 部分，档位名由滑条自己写） */
+  const menuHintOf = (level: ReasoningEffort): string => {
+    const plan = planReasoning({
+      protocol: menuProfile?.protocol ?? 'openai',
+      effort: level,
+      ...(menuAdapter !== undefined
+        ? { adapter: menuAdapter, model: menuProfile?.model ?? '' }
+        : {}),
+      ...(menuProfile?.maxOutput !== undefined ? { maxOutput: menuProfile.maxOutput } : {})
+    })
+    return reasoningDetail(plan)
+  }
+
+  /** 写回档位：只影响**后续请求**（正在跑的那轮不回溯），乐观更新 + 读回同步 */
+  const applyReasoning = async (level: ReasoningEffort): Promise<void> => {
+    if (menuProfile === undefined) return
+    const before = menuProfile.reasoningEffort
+    setProfiles((cur) =>
+      cur.map((p) => (p.id === menuProfile.id ? { ...p, reasoningEffort: level } : p))
+    )
+    try {
+      const res = await window.petAPI.settingsSet({
+        model: {
+          profiles: profiles.map((p) =>
+            p.id === menuProfile.id ? { ...p, reasoningEffort: level } : p
+          ),
+          activeId
+        }
+      })
+      setProfiles(res.model.profiles)
+      const plan = planReasoning({
+        protocol: menuProfile.protocol,
+        effort: level,
+        ...(menuAdapter !== undefined ? { adapter: menuAdapter, model: menuProfile.model } : {}),
+        ...(menuProfile.maxOutput !== undefined ? { maxOutput: menuProfile.maxOutput } : {})
+      })
+      // 折算说明优先级：厂商适配器 note（如"已按 max 发送"）> 通用协议钳制旧文案
+      const tail = plan.adapterNote
+        ? plan.adapterNote
+        : plan.clamped
+          ? '该协议上限，已自动降级'
+          : ''
+      flashNotice(
+        `「${menuProfile.name}」思考强度 → ${reasoningSummary(plan)}${tail !== '' ? `（${tail}）` : ''}；下次发言生效`
+      )
+    } catch {
+      setProfiles((cur) =>
+        cur.map((p) => (p.id === menuProfile.id ? { ...p, reasoningEffort: before } : p))
+      )
+      flashNotice('思考强度保存失败')
+    }
+  }
+
+  // 点别处/切模型就收起菜单（右键菜单不该常驻）
+  useEffect(() => {
+    if (reasoningMenu === null) return
+    const close = (): void => setReasoningMenu(null)
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [reasoningMenu])
 
   // ── 附件（主进程原生对话框选择并读取，见 main/file-pick.ts）──────────
   const flashNotice = (message: string): void => {
     setNotice(message)
     window.setTimeout(() => setNotice((cur) => (cur === message ? '' : cur)), 4000)
+  }
+
+  /** 手动压缩当前会话（P8-T1）：主进程读会话档案生成摘要并落盘，下次发言起生效 */
+  const doCompact = async (): Promise<void> => {
+    if (sessionId === null) return
+    setCompacting(true)
+    try {
+      const res = await window.petAPI.chatCompact(sessionId)
+      flashNotice(res.message)
+    } catch {
+      // 交互约定：点按钮 → 置 busy → 异步 then 复位，必须带 catch 复位
+      //（否则一次 IPC 失败就把按钮永久置灰）
+      flashNotice('压缩上下文失败（主进程未响应）')
+    } finally {
+      setCompacting(false)
+    }
   }
 
   const pickFiles = async (): Promise<void> => {
@@ -200,19 +341,62 @@ function ChatInput(): React.JSX.Element {
     if (res.attachments.length > room) {
       res.warnings.push(`附件总数最多 ${MAX_ATTACHMENTS} 个，多余的未添加`)
     }
-    // 视觉前置提示：当前档案没开多模态却选了图片 → 当场提醒，
-    // 而不是等发出去才被主进程拒绝（主进程那道门是权威兜底，这里只是提前打招呼）。
+    // 视觉前置提示：当前档案没开多模态却选了图片 → 当场提醒。
+    // P8-T3 起不再是"一定看不到"：配了视觉档案（设置 → 模型）会由它转述成文字，
+    // 但转述会比直接看图更容易认错字——所以照实说清两种情况，别让用户以为稳了。
     const hasImage = accepted.some((a) => a.kind === 'image')
     const active = profiles.find((p) => p.id === activeId)
     if (hasImage && active !== undefined && active.multimodal !== true) {
       res.warnings.push(
-        `当前模型「${active.name}」未开启多模态，图片发过去她会看不了——可在 设置 → 模型 编辑该档案打开「多模态」，或切到支持视觉的模型。`
+        `当前模型「${active.name}」未开启多模态：若已在 设置 → 模型 配好「视觉档案」，图片会先由它转述成文字（据识图转述，长数字可能认错）；没配的话她会看不到这张图。`
       )
     }
     if (accepted.length > 0) {
       setAttachments((cur) => [...cur, ...accepted.map((a) => ({ ...a, id: newAttId() }))])
     }
     if (res.warnings.length > 0) flashNotice(res.warnings.join('；'))
+  }
+
+  // ── 直接粘贴图片（截图后 Ctrl+V 进输入框）──────────────────────────
+  // 只拦图片：纯文字粘贴走 textarea 默认行为；非图片文件忽略。
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    if (streaming || needWorkspace) return
+    const files = [...event.clipboardData.files].filter((f) => f.type.startsWith('image/'))
+    if (files.length === 0) return
+    event.preventDefault() // 有图片才接管，避免把图片文件名粘进文字里
+    void (async () => {
+      const accepted: LocalAtt[] = []
+      const warns: string[] = []
+      for (const file of files) {
+        if (accepted.length >= MAX_ATTACHMENTS - attachments.length) {
+          warns.push(`附件总数最多 ${MAX_ATTACHMENTS} 个，多余的未添加`)
+          break
+        }
+        const ext = (file.name.match(/\.\w+$/)?.[0] ?? '.png').toLowerCase()
+        const name =
+          file.name !== '' && !/^image\./i.test(file.name)
+            ? file.name
+            : `粘贴图片-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}${ext}`
+        if (file.size > MAX_IMAGE_BYTES) {
+          warns.push(`图片 ${name} 超过 6MB，未添加`)
+          continue
+        }
+        const dataUrl = await readImageAsDataUrl(file)
+        if (dataUrl === null) {
+          warns.push(`图片 ${name} 读取失败`)
+          continue
+        }
+        accepted.push({ id: newAttId(), name, kind: 'image', size: file.size, dataUrl })
+      }
+      const active = profiles.find((p) => p.id === activeId)
+      if (accepted.length > 0 && active !== undefined && active.multimodal !== true) {
+        warns.push(
+          `当前模型「${active.name}」未开启多模态：若已配好「视觉档案」会由它转述成文字，否则她看不到这张图（见 设置 → 模型）。`
+        )
+      }
+      if (accepted.length > 0) setAttachments((cur) => [...cur, ...accepted])
+      if (warns.length > 0) flashNotice(warns.join('；'))
+    })()
   }
 
   const doSend = (): void => {
@@ -336,6 +520,7 @@ function ChatInput(): React.JSX.Element {
           disabled={needWorkspace}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
         />
         <div className="chat-input-actions" style={{ position: 'relative' }}>
           <span className="chat-input-actions-left">
@@ -391,7 +576,7 @@ function ChatInput(): React.JSX.Element {
               onMouseEnter={() => setUsageOpen(true)}
               onMouseLeave={() => setUsageOpen(false)}
             >
-              <UsageRing ratio={usage.ratio} busy={streaming} />
+              <UsageRing ratio={usage.ratio} busy={streaming} over={overCap} />
               {usageOpen ? (
                 <div className="usage-pop" role="tooltip">
                   <div className="usage-pop-title">上下文用量明细</div>
@@ -414,18 +599,37 @@ function ChatInput(): React.JSX.Element {
                       <b>{fmtTokens(usage.conv)} tokens（估算）</b>
                     </div>
                   )}
-                  <div className="usage-pop-row total">
+                  <div className={`usage-pop-row total${overCap ? ' over' : ''}`}>
                     <span>已使用</span>
                     <b>
                       {contextCap > 0
-                        ? `${(usage.ratio * 100).toFixed(1)}% · ${fmtTokens(usage.used)} / ${fmtTokens(contextCap)}`
+                        ? // 超限时显示真实百分比（clamp 成 100% 会把 17.9K/10K 这种情况藏掉）
+                          `${((usage.used / contextCap) * 100).toFixed(usage.used > contextCap ? 0 : 1)}% · ${fmtTokens(usage.used)} / ${fmtTokens(contextCap)}`
                         : `${fmtTokens(usage.used)} tokens`}
                     </b>
                   </div>
+                  {overCap ? (
+                    <div className="usage-pop-note over-hint">
+                      已经超过窗口：人设与工具说明是固定占用（压缩只动历史消息）。请把档案的上下文窗口调大，或到
+                      设置 → 工具 关掉用不到的工具。
+                    </div>
+                  ) : null}
                   <div className="usage-pop-note">
                     {usage.real
                       ? '数据来源：上次请求的真实用量（每次对话后自动更新）'
                       : '数据来源：字符估算（首次对话后自动转为真实用量）'}
+                  </div>
+                  {/* 手动压缩（P8-T1）：把更早的对话折叠成摘要，下次发言起生效 */}
+                  <button
+                    type="button"
+                    className="approval-btn usage-pop-action"
+                    disabled={streaming || compacting || sessionId === null}
+                    onClick={() => void doCompact()}
+                  >
+                    {compacting ? '压缩中…' : '压缩更早的对话'}
+                  </button>
+                  <div className="usage-pop-note">
+                    原始记录不会被删（回看/搜索仍是原文）；只是把更早的部分摘要成一段转述，省出窗口空间。
                   </div>
                 </div>
               ) : null}
@@ -450,9 +654,15 @@ function ChatInput(): React.JSX.Element {
                       title={
                         profile.model === ''
                           ? '该档案还没填模型名（点编辑填写后可切换）'
-                          : profile.baseUrl
+                          : `${profile.baseUrl}（右键调整思考强度）`
                       }
                       onClick={() => void switchModel(profile.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        // 右键 = 调思考强度（P8-T4 图二）：没开思考的档案也弹，
+                        // 但菜单里说明清楚去哪儿开——比"右键没反应"强得多
+                        setReasoningMenu(profile.id)
+                      }}
                     >
                       <span className="sw-name">
                         {profile.id === activeId ? '✓ ' : ''}
@@ -463,6 +673,34 @@ function ChatInput(): React.JSX.Element {
                       </span>
                     </button>
                   ))}
+                </div>
+              ) : null}
+              {reasoningMenu !== null ? (
+                <div
+                  className="reasoning-pop"
+                  role="dialog"
+                  aria-label="调整思考强度"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <div className="reasoning-pop-head">思考强度</div>
+                  {menuLevels.length === 0 ? (
+                    <div className="reasoning-pop-empty">
+                      该档案还没开启思考模式——到 设置 → 模型 → 编辑，勾选「支持的思考强度」后再来。
+                    </div>
+                  ) : (
+                    <>
+                      <ReasoningSlider
+                        levels={menuLevels}
+                        value={menuProfile?.reasoningEffort}
+                        onChange={(level) => void applyReasoning(level)}
+                        hintOf={menuHintOf}
+                        model={menuProfile?.model ?? ''}
+                      />
+                      <div className="reasoning-pop-note">
+                        改动「下次发言」生效（正在跑的这轮不回溯）；默认档位在 设置 → 模型 里改。
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : null}
             </span>

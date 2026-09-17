@@ -36,6 +36,7 @@ import {
   SHELL_DEFAULT_TIMEOUT_MS
 } from './run-shell'
 import { executeJs, JS_DEFAULT_TIMEOUT_MS } from './run-js'
+import { safeCalculate } from './calculate'
 import { searchWeb } from './web-search'
 import { netFetch } from '../../net/fetch'
 import { countLineDiff } from '@shared/diff-stat'
@@ -43,6 +44,17 @@ import { RUN_JS_MARKER } from '@shared/produced-file'
 import { addEntry, readEntries } from '../../memory/memory-store'
 import { scoreEntries } from '@shared/memory'
 import { searchWorkspaceContent } from '../../search/content-search'
+import { runOcr } from './ocr'
+import {
+  PDF_DEFAULT_PAGES,
+  PDF_MAX_BYTES,
+  PDF_MAX_PAGES,
+  formatPdfPages,
+  isPdfFile,
+  pageWindow,
+  readPdfPages,
+  SCANNED_PDF_HINT
+} from '../../chat/pdf-extract'
 
 export interface ToolContext {
   signal: AbortSignal
@@ -86,7 +98,12 @@ const TOOL_TIMEOUT_MS = 10_000
 const TOOL_TIMEOUT_OVERRIDES: Record<string, number> = {
   run_shell: 95_000,
   web_search: 35_000,
-  run_js: 190_000 // 子进程冷启 + 文档生成留分钟级余量（工具内另有 180s 上限）
+  run_js: 190_000, // 子进程冷启 + 文档生成留分钟级余量（工具内另有 180s 上限）
+  // 识图要走一次视觉模型调用（推理慢、图片还要上传），默认 10s 必然被砍——
+  // 与 vision.ts 的 VISION_TIMEOUT_MS(60s) 同档并留出余量
+  describe_image: 95_000,
+  // 本机 OCR 要冷启 WinRT（首次加载慢），给 20s 探针超时留余量
+  ocr_image: 30_000
 }
 
 // ── 路径基准────────────────────────────────────────────
@@ -240,6 +257,33 @@ const currentTimeTool: ToolDef = {
   }
 }
 
+/** 只读工具白名单：calculate —— 单条算术表达式精确求值（零副作用，不弹审批）。
+ * 治"口算自信但算错"：六位数以上/百分比/多步连算先走这里；多步或要用数学/日期
+ * 函数才走 run_js（子进程 + 弹卡）。内核与安全拦截在 ./calculate（纯逻辑可单测）。 */
+const calculateTool: ToolDef = {
+  name: 'calculate',
+  description:
+    '精确计算单条数学表达式，立即返回确定数值。支持加减乘除、括号、乘方 **、取余 %、小数、千位逗号（3,842）与科学计数法（2.5e2）。' +
+    '**凡是涉及算术（百分比换算、多步连算、总价/折扣/天数差等）都必须先调用本工具拿到结果再回答，禁止心算**——心算在多位数时经常错且错得很自然。' +
+    '百分数自己换成小数写（17.5% 写成 0.175）。需要开方/三角函数/日期函数或多步编程计算时才用 run_js；本工具不支持变量、函数与标识符。',
+  parameters: {
+    type: 'object',
+    properties: {
+      expression: {
+        type: 'string',
+        description: '一条算术表达式，如 3842*0.175*12.6'
+      }
+    },
+    required: ['expression'],
+    additionalProperties: false
+  },
+  execute: async (args) => {
+    const r = safeCalculate(args.expression)
+    if (!r.ok) throw new Error(r.error)
+    return r.text
+  }
+}
+
 /** read_file 单次读取的行数上限（模型可用 offset/limit 分段读大文件） */
 const READ_MAX_LINES = 800
 /** read_file 默认行数 */
@@ -259,19 +303,20 @@ function fmtBytes(n: number): string {
 }
 
 /**
- * 非纯文本文件的明确边界提示：read_file 只能读文本，图片/Office/PDF 会被
+ * 非纯文本文件的明确边界提示：read_file 只能读文本，图片/Office 会被
  * 二进制嗅探拒绝——但那句"含 NUL 字节"对用户是天书。这里按扩展名提前给准确指引：
- * 图片 → 走聊天附件（模型开多模态才能"看"）；Office/PDF → 走右侧栏预览。
+ * 图片 → 走聊天附件（模型开多模态才能"看"）；Office → 走右侧栏预览。
+ * **PDF 不在此列**（P8-T2 起 read_file 能直接抽它的正文，在 execute 里分流）。
  * 返回 null = 不是这些已知类型（交给通用二进制嗅探兜底）。
  */
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|ico|tiff?)$/i
-const OFFICE_EXT = /\.(docx?|xlsx?|pptx?|pdf|epub)$/i
+const OFFICE_EXT = /\.(docx?|xlsx?|pptx?|epub)$/i
 function nonTextFileHint(filePath: string): string | null {
   if (IMAGE_EXT.test(filePath)) {
     return `${filePath} 是图片，read_file 读不了它的内容。要看图，请把图片作为聊天附件发给她（需当前模型在 设置 → 模型 开启「多模态」）；只想在界面上查看，用右侧栏文件预览打开。`
   }
   if (OFFICE_EXT.test(filePath)) {
-    return `${filePath} 是 Office/PDF 文档（非纯文本），read_file 读不了。若是用户刚发来的附件，正文（docx/xlsx/pptx）已随消息内联，直接用消息里的内容即可；否则可在右侧栏文件树点开看文本级预览，或请用户另存为文本/重新附件发来（.docx→.txt 亦可）。`
+    return `${filePath} 是 Office 文档（非纯文本），read_file 读不了。若是用户刚发来的附件，正文（docx/xlsx/pptx）已随消息内联，直接用消息里的内容即可；否则可在右侧栏文件树点开看文本级预览，或请用户另存为文本/重新附件发来（.docx→.txt 亦可）。`
   }
   return null
 }
@@ -294,15 +339,19 @@ function intArg(args: Record<string, unknown>, key: string, fallback: number): n
 const readFileTool: ToolDef = {
   name: 'read_file',
   description:
-    '读取一个文本文件的内容（自动带行号）。推荐绝对路径；相对路径会相对应用所在目录解析。二进制文件与超过 2MB 的文件会被拒绝。大文件用 offset/limit 分段读取。',
+    '读取一个文本文件的内容（自动带行号）。推荐绝对路径；相对路径会相对应用所在目录解析。二进制文件与超过 2MB 的文件会被拒绝。大文件用 offset/limit 分段读取。' +
+    `**PDF 也能直接读**（自动抽取正文并按【第 N 页】分段）：读 PDF 时 offset/limit 的含义变为页码——offset=起始页（缺省 1），limit=最多页数（缺省 ${PDF_DEFAULT_PAGES}）；扫描件（没有文本层）会明确告知。`,
   parameters: {
     type: 'object',
     properties: {
       path: { type: 'string', description: '要读取的文件路径（推荐绝对路径）' },
-      offset: { type: 'number', description: '起始行号（从 1 开始），缺省为 1' },
+      offset: {
+        type: 'number',
+        description: '起始位置：文本文件为起始行号，PDF 为起始页（都从 1 开始），缺省为 1'
+      },
       limit: {
         type: 'number',
-        description: `最多读取行数（≤${READ_MAX_LINES}），缺省 ${READ_DEFAULT_LINES}`
+        description: `最多读取量：文本文件为行数（≤${READ_MAX_LINES}），PDF 为页数（≤${PDF_MAX_PAGES}）；缺省 文本 ${READ_DEFAULT_LINES} 行 / PDF ${PDF_DEFAULT_PAGES} 页`
       }
     },
     required: ['path']
@@ -311,9 +360,11 @@ const readFileTool: ToolDef = {
     const rawPath = strArg(args, 'path')
     if (rawPath === null) throw new Error('缺少 path 参数（要读取的文件路径）')
     const offset = intArg(args, 'offset', 1)
-    if (offset === null) throw new Error('offset 必须是正整数（起始行号，从 1 开始）')
-    const limit = intArg(args, 'limit', READ_DEFAULT_LINES)
-    if (limit === null) throw new Error(`limit 必须是正整数（≤${READ_MAX_LINES}）`)
+    if (offset === null) throw new Error('offset 必须是正整数（起始行号/起始页，从 1 开始）')
+    const limit = intArg(args, 'limit', 0) // 0 = 未指定（文本与 PDF 的缺省值不同，分别在各自分支取）
+    if (limit === null) {
+      throw new Error(`limit 必须是正整数（文本 ≤${READ_MAX_LINES} 行 / PDF ≤${PDF_MAX_PAGES} 页）`)
+    }
 
     const filePath = resolveToolPath(rawPath, ctx.workspace)
 
@@ -321,12 +372,41 @@ const readFileTool: ToolDef = {
     if (info.isDirectory()) {
       throw new Error(`${filePath} 是一个目录，请改用 list_dir 查看其内容。`)
     }
+
+    // ── PDF 分流（P8-T2）：它的正文靠 unpdf 抽文本层，按行读字节是读不出来的 ──
+    if (isPdfFile(filePath)) {
+      if (info.size > PDF_MAX_BYTES) {
+        throw new Error(
+          `PDF 过大（${fmtBytes(info.size)} > ${PDF_MAX_BYTES / 1024 / 1024} MB），拒绝读取——请让用户拆分或提供关键页截图。`
+        )
+      }
+      const pdf = await readPdfPages(readFileSync(filePath))
+      if (!pdf.ok) throw new Error(`${filePath}：${pdf.error}`)
+      const { from, to } = pageWindow(
+        pdf.totalPages,
+        offset,
+        limit === 0 ? PDF_DEFAULT_PAGES : limit
+      )
+      const header = `# ${filePath}（PDF，共 ${pdf.totalPages} 页；本次第 ${from}–${to} 页）`
+      const formatted = formatPdfPages(pdf.pages, { from, to })
+      // 扫描件：没有文本层就不是"读到空内容"，而是"这份文件本来就没有字"——说清楚
+      if (formatted.empty) {
+        return `${header}\n${SCANNED_PDF_HINT}`
+      }
+      let out = `${header}\n${formatted.text}`
+      if (to < pdf.totalPages) {
+        out += `\n…（未显示第 ${to + 1}–${pdf.totalPages} 页；可用 offset=${to + 1} 继续读）`
+      }
+      return out
+    }
+
     // 图片/Office 不是纯文本——按扩展名给明确边界，而不是笼统的"二进制拒绝"。
     const binaryHint = nonTextFileHint(filePath)
     if (binaryHint !== null) throw new Error(binaryHint)
     if (info.size > READ_MAX_BYTES) {
       throw new Error(`文件过大（${fmtBytes(info.size)} > 2 MB），拒绝读取。`)
     }
+    const textLimit = limit === 0 ? READ_DEFAULT_LINES : limit
 
     // 读满 8KB 嗅探窗口判二进制：NUL 字节几乎不会出现在正常文本里
     const fd = openSync(filePath, 'r')
@@ -344,7 +424,7 @@ const readFileTool: ToolDef = {
       // 尾部换行产生的空行不算内容行
       const effectiveTotal = total > 1 && lines[total - 1] === '' ? total - 1 : total
       const start = Math.min(offset, Math.max(effectiveTotal, 1))
-      const end = Math.min(start - 1 + Math.min(limit, READ_MAX_LINES), effectiveTotal)
+      const end = Math.min(start - 1 + Math.min(textLimit, READ_MAX_LINES), effectiveTotal)
       const slice = lines.slice(start - 1, end)
       const numbered = slice.map((line, i) => `${String(start + i).padStart(4, ' ')}→ ${line}`)
       const header = `# ${filePath}（第 ${start}–${end} 行，共 ${effectiveTotal} 行）`
@@ -563,6 +643,58 @@ const mkdirTool: ToolDef = {
   }
 }
 
+/**
+ * 登记中间产物：mark_temp_files —— 把"本轮自己产生、确认是中间产物"的文件登记为
+ * 可清理。**这是自动清理唯一的意图信号**（不猜后缀、不猜目录名——两次误删事故的教训）。
+ * 非 mutating（只登记意图，不碰文件）；真正的删除在任务正常收尾时由 run.ts 按
+ * temp-cleanup 的 7 道闸门执行，且走回收站。
+ * execute 仅占位：登记表是 per-run 内存态，在 run.ts 的 executeTool 包装层拦截。
+ */
+const markTempFilesTool: ToolDef = {
+  name: 'mark_temp_files',
+  mutating: false,
+  description:
+    '登记本轮你自己产生的中间产物（临时脚本、中间数据、调试日志等），任务正常结束后系统会把它们移入回收站。' +
+    '**只登记你确认没用的中间文件**：用户要求保留或交付的文件（报告、成品、他让你建的文件）一律不许登记；' +
+    '用户已有的文件也不登记（系统只清理你本轮新建的）。不确定就不登记——不登记只是留着，登记错了才是真损失。' +
+    '可一次登记多个；登记后照常在回复里说明你清理了哪些。',
+  parameters: {
+    type: 'object',
+    properties: {
+      paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '要登记的中间产物路径（相对工作区或绝对路径，1-10 个）'
+      }
+    },
+    required: ['paths']
+  },
+  execute: async () => 'mark_temp_files 需要在主会话运行时中执行（登记表未在当前上下文接入）。'
+}
+
+/**
+ * 删除文件/文件夹：delete_file —— 移入回收站（可还原），不做永久删除。
+ * mutating 且在 permission.ts 里**特判为每次必审批**（完全访问模式除外，
+ * 且不记 allow-always）。execute 仅占位：真正的回收站调用用了 electron shell，
+ * 在 run.ts 的 executeTool 包装层拦截转 tools/trash.ts（同 ask_user）。
+ */
+const deleteFileTool: ToolDef = {
+  name: 'delete_file',
+  mutating: true,
+  description:
+    '把文件或文件夹移入系统回收站（不是永久删除，可在回收站还原）。' +
+    '每次删除都会请用户确认（「完全访问」模式除外）；盘根、用户目录、工作区根与系统目录受保护、无法删除。' +
+    '适合清理用户明确要求删除的文件；你自己产生的中间产物请用 mark_temp_files 登记，任务收尾会自动清理，不用调本工具。',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: '要删除的文件或文件夹路径（相对工作区或绝对路径）' }
+    },
+    required: ['path']
+  },
+  execute: async () => 'delete_file 需要在主会话运行时中执行（回收站调用未在当前上下文接入）。'
+}
+
 /** 变更类工具：undo_last_change —— 线性回滚本会话最近一笔变更 */
 const undoLastChangeTool: ToolDef = {
   name: 'undo_last_change',
@@ -701,6 +833,128 @@ const activeWindowTool: ToolDef = {
   parameters: { type: 'object', properties: {}, required: [] },
   mutating: false, // 只读：不改动任何东西；隐私管控走独立开关而非审批弹卡
   execute: async () => getActiveWindow()
+}
+
+// ── describe_image（P8-T3 视觉旁路）：把本地图片转述成文字 ────────────────
+/**
+ * 识图跑腿函数：主进程 ready 时注入（实现见 llm/vision.ts 的 makeVisionRunner，
+ * 读配置 / 选视觉档案 / 取密钥 / 调模型都在那边）。
+ * registry 自身保持无 config / secrets 依赖——与 setScreenProbe 同款注入模式。
+ */
+export type DescribeImageProbe = (
+  dataUrl: string,
+  question: string | null,
+  signal: AbortSignal
+) => Promise<string>
+
+let describeImageProbe: DescribeImageProbe | null = null
+
+/** 注入识图实现（测试注入假实现；null = 未就绪） */
+export function setDescribeImageProbe(fn: DescribeImageProbe | null): void {
+  describeImageProbe = fn
+}
+
+/** 图片 dataUrl 的 MIME 表（与 file-pick 同口径） */
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif'
+}
+/** 单张图上限（与聊天附件一致：6MB 二进制） */
+const DESCRIBE_MAX_BYTES = 6 * 1024 * 1024
+
+/** 图片类工具（describe_image / ocr_image）共用的路径校验：解析 → 扩展名 → 是文件 → 大小 */
+function resolveImageForTool(
+  rawPath: string,
+  workspace: string | null | undefined
+): { filePath: string; mime: string } {
+  const filePath = resolveToolPath(rawPath, workspace)
+  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
+  const mime = IMAGE_MIME_BY_EXT[ext]
+  if (mime === undefined) {
+    throw new Error(
+      `${filePath} 不是支持的图片格式（只认 png/jpg/jpeg/webp/gif）。若这是 PDF，请用 read_file。`
+    )
+  }
+  const info = statSync(filePath) // 不存在 → ENOENT 由 executeToolCall 收敛为可读错误
+  if (info.isDirectory()) throw new Error(`${filePath} 是一个目录，请改用 list_dir。`)
+  if (info.size > DESCRIBE_MAX_BYTES) {
+    throw new Error(`图片过大（${fmtBytes(info.size)} > 6 MB），拒绝处理。`)
+  }
+  return { filePath, mime }
+}
+
+/**
+ * describe_image：读一张本地图片并返回**文字转述**。
+ * 用途：任务中途看工作区里的截图 / 图表 / 报错弹窗——她自己看不到图片文件。
+ * 非 mutating（只读）；图片会发往"视觉档案"（用户在设置里指定，隐私说明写在设置页）。
+ */
+const describeImageTool: ToolDef = {
+  name: 'describe_image',
+  description:
+    '读取一张本地图片并返回文字转述（逐字文字 / 版面结构 / 语义摘要三段）。' +
+    '**你自己看不到图片文件**，所以要看工作区里的截图、图表、报错弹窗、设计稿时用这个工具；' +
+    '用户直接发来的图片不需要调它（会随消息自动处理）。' +
+    '转述可能是错的（尤其长数字）：引用时标明"根据图片识别"，关键信息让用户核对；' +
+    '需要**精确逐字**（数字、代码、表格单元格）时再用 ocr_image 核一遍，两者不一致要把冲突点出来。' +
+    'question 可选，用来追问具体信息（如"这张报表第三行是多少"）。',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: '图片路径（推荐绝对路径）' },
+      question: { type: 'string', description: '可选：希望特别回答的问题' }
+    },
+    required: ['path']
+  },
+  mutating: false,
+  execute: async (args, ctx) => {
+    const rawPath = strArg(args, 'path')
+    if (rawPath === null) throw new Error('缺少 path 参数（要识别的图片路径）')
+    const { filePath, mime } = resolveImageForTool(rawPath, ctx.workspace)
+    if (describeImageProbe === null) {
+      throw new Error('识图功能尚未就绪（应用还在启动中），请稍后重试。')
+    }
+    const dataUrl = `data:${mime};base64,${readFileSync(filePath).toString('base64')}`
+    const question = strArg(args, 'question')
+    return describeImageProbe(dataUrl, question, ctx.signal)
+  }
+}
+
+/**
+ * ocr_image（P8-T3 第二条腿）：用 **Windows 自带** OCR 逐字识别本地图片文字。
+ * 与 describe_image 的分工（要写进工具描述，防她选错）：
+ * - 要**精确逐字**（数字/编号/代码/表格单元格）→ 本工具（本机识别、不上网、不漏字）
+ * - 要**版面理解与语义**（这是什么图、讲了什么）→ describe_image（视觉模型）
+ * - 两边结果不一致 → 必须把冲突点出来让用户定，不许自己选一个当真
+ * 非 Windows 或没装中文 OCR 语言包时明确回一句"不可用"，不静默失败。
+ */
+const ocrImageTool: ToolDef = {
+  name: 'ocr_image',
+  description:
+    '用本机 Windows 的 OCR 引擎逐字识别一张图片里的文字（不联网、不上传、不花钱）。' +
+    '**要精确抄字时用它**：数字、金额、编号、代码、表格单元格、报错信息。' +
+    '它不懂版面与语义——想知道"这张图在讲什么"用 describe_image。' +
+    '**只接受工作区里有真实路径的图片文件**；用户在聊天里直接粘贴/发送的图片没有磁盘路径，' +
+    '对它们调本工具必然 ENOENT——那种图片你直接就能看到，不要猜路径、不要搜磁盘，' +
+    '需要更清晰的字就请用户把图存到工作区或重发。' +
+    '识别结果仍可能错认个别字符，关键数字要提醒用户核对；' +
+    '若与 describe_image 的转述不一致，把两边结果都摆出来让用户定，不要自己挑一个当真。',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: '图片路径（推荐绝对路径）' }
+    },
+    required: ['path']
+  },
+  mutating: false,
+  execute: async (args, ctx) => {
+    const rawPath = strArg(args, 'path')
+    if (rawPath === null) throw new Error('缺少 path 参数（要识字的图片路径）')
+    const { filePath } = resolveImageForTool(rawPath, ctx.workspace)
+    return runOcr(filePath)
+  }
 }
 
 /**
@@ -1861,6 +2115,7 @@ const memorySearchTool: ToolDef = {
 
 const TOOLS: ToolDef[] = [
   currentTimeTool,
+  calculateTool,
   readFileTool,
   listDirTool,
   writeFileTool,
@@ -1875,9 +2130,13 @@ const TOOLS: ToolDef[] = [
   exportPdfTool,
   webSearchTool,
   mkdirTool,
+  markTempFilesTool,
+  deleteFileTool,
   undoLastChangeTool,
   todoWriteTool,
   activeWindowTool,
+  describeImageTool,
+  ocrImageTool,
   noteWriteTool,
   noteReadTool,
   searchContentTool,

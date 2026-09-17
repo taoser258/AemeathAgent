@@ -104,7 +104,14 @@ export interface SweepResult {
  */
 export function sweepSessionStore(
   dir: string,
-  archives: { ledger?: string; todos?: string; notes?: string; checkpoint?: string },
+  archives: {
+    ledger?: string
+    todos?: string
+    notes?: string
+    checkpoint?: string
+    /** 上下文摘要档（P8-T1）：会话没了就清掉 */
+    compact?: string
+  },
   options?: { now?: number; maxEmptyAgeMs?: number }
 ): SweepResult {
   const now = options?.now ?? Date.now()
@@ -142,7 +149,13 @@ export function sweepSessionStore(
   }
 
   // 孤儿旁路档
-  for (const archiveDir of [archives.ledger, archives.todos, archives.notes, archives.checkpoint]) {
+  for (const archiveDir of [
+    archives.ledger,
+    archives.todos,
+    archives.notes,
+    archives.checkpoint,
+    archives.compact
+  ]) {
     if (archiveDir === undefined || !existsSync(archiveDir)) continue
     for (const name of readdirSync(archiveDir)) {
       const m = /^([A-Za-z0-9-]+)\.json$/.exec(name)

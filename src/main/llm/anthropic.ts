@@ -1,4 +1,4 @@
-// Anthropic Messages API 适配：openai 形态的 ChatTurn[]/LlmTool ↔ Anthropic
+﻿// Anthropic Messages API 适配：openai 形态的 ChatTurn[]/LlmTool ↔ Anthropic
 // messages/tools 的双向转换 + 原生 fetch SSE 流式解析。
 // 为什么手写而不装 @anthropic-ai/sdk：本阶段唯一解禁依赖是 MCP SDK，
 // Anthropic 走原生 fetch + 自研 SSE 行解析（协议稳定，代码可控）。
@@ -12,6 +12,7 @@ import type {
   StreamChatResult,
   ToolCallDraft
 } from './client'
+import { planReasoning } from '@shared/reasoning'
 import type { TokenUsage } from '@shared/types'
 
 /** Anthropic temperature 合法范围 0~1（与 openai 兼容端点的 0~2 不同，发送前钳制） */
@@ -318,13 +319,18 @@ export async function streamAnthropic(
   const rest = request.messages.filter((t) => t.role !== 'system')
   // 思考强度：extended thinking 预算档位。开启时 Anthropic 要求 temperature 恒为 1，
   // 且 max_tokens 必须大于预算（预算含在 completion 里）。
-  const budget =
-    request.reasoningEffort !== undefined && request.reasoningEffort !== 'default'
-      ? { low: 4096, medium: 10240, high: 20480 }[request.reasoningEffort]
-      : undefined
+  // P8-T4：档位 → 预算的换算与"输出上限压小预算"的钳制都在 reasoning.ts（表驱动 + 单测）
+  const reasoning = planReasoning({
+    protocol: 'anthropic',
+    ...(request.reasoningEffort !== undefined ? { effort: request.reasoningEffort } : {}),
+    ...(request.maxOutput !== undefined ? { maxOutput: request.maxOutput } : {})
+  })
+  const budget = reasoning.enabled && reasoning.budget !== undefined ? reasoning.budget : undefined
   const body = {
     model: request.model,
-    max_tokens: budget !== undefined ? budget + 4096 : ANTHROPIC_DEFAULT_MAX_TOKENS,
+    max_tokens:
+      reasoning.maxTokens ??
+      (budget !== undefined ? budget + ANTHROPIC_DEFAULT_MAX_TOKENS : ANTHROPIC_DEFAULT_MAX_TOKENS),
     temperature:
       budget !== undefined
         ? ANTHROPIC_MAX_TEMPERATURE

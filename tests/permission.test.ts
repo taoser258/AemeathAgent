@@ -14,9 +14,9 @@ const WS = '/ws'
 vi.mock('../src/main/agent/tools/registry', () => ({
   // 变更类：write_file / send_email；MCP 工具**不是**变更类（新语义）
   isMutatingTool: (name: string): boolean => name === 'write_file' || name === 'send_email',
-  // 目标路径解析：write_file 取 args.path；绝对路径原样、相对路径拼工作区；无工作区则无法解析
+  // 目标路径解析：write_file/delete_file 取 args.path；绝对路径原样、相对路径拼工作区；无工作区则无法解析
   approvalTargetPath: (name: string, argsJson: string, workspace: string | null): string | null => {
-    if (name !== 'write_file') return null
+    if (name !== 'write_file' && name !== 'delete_file') return null
     let raw = 'a.txt'
     try {
       raw = String((JSON.parse(argsJson) as { path?: string }).path ?? 'a.txt')
@@ -288,6 +288,46 @@ describe('会话级允许记忆（基础 API）', () => {
     allowSessionTool('s9', 'write_file')
     expect(isSessionToolAllowed('s9', 'write_file')).toBe(true)
     expect(isSessionToolAllowed('s9', 'send_email')).toBe(false)
+  })
+})
+
+// ── delete_file 特判（owner 硬要求：除完全访问外每次删除必弹审批，不记 allow-always）──
+describe('createToolGate · delete_file 特判', () => {
+  it('★ confirm 下即使在工作区内也每次必问（不享受工作区内变更直放）', async () => {
+    const { ask, asked } = makeAsker(['allow', 'allow'])
+    const gate = createToolGate('confirm', 's1', ask, BOUND)
+    expect(await gate.beforeTool?.(tc('d1', 'delete_file', '{"path":"sub/a.tmp"}'))).toBe('allow')
+    expect(await gate.beforeTool?.(tc('d2', 'delete_file', '{"path":"sub/b.tmp"}'))).toBe('allow')
+    expect(asked).toHaveLength(2) // 两次删除问了两次
+    expect(isSessionToolAllowed('s1', 'delete_file')).toBe(false)
+  })
+
+  it('★ allow-always 也不记记忆：下一次删除照样弹卡', async () => {
+    const { ask, asked } = makeAsker(['allow-always', 'deny'])
+    const gate = createToolGate('confirm', 's1', ask, BOUND)
+    expect(await gate.beforeTool?.(tc('d1', 'delete_file', '{"path":"/ws/a.tmp"}'))).toBe('allow')
+    expect(await gate.beforeTool?.(tc('d2', 'delete_file', '{"path":"/ws/b.tmp"}'))).toBe('deny')
+    expect(asked).toHaveLength(2)
+  })
+
+  it('full 模式：删除直接放行不询问', async () => {
+    setPermissionMode('full')
+    try {
+      const { ask, asked } = makeAsker([])
+      const gate = createToolGate('full', 's1', ask, BOUND)
+      expect(await gate.beforeTool?.(tc('d1', 'delete_file', '{"path":"sub/a.tmp"}'))).toBe('allow')
+      expect(asked).toHaveLength(0)
+    } finally {
+      setPermissionMode('confirm')
+    }
+  })
+
+  it('审批卡 reason 明示"移入回收站、每次都要确认"', async () => {
+    const { ask, asked } = makeAsker(['deny'])
+    const gate = createToolGate('confirm', 's1', ask, BOUND)
+    await gate.beforeTool?.(tc('d1', 'delete_file', '{"path":"sub/a.tmp"}'))
+    expect(asked[0].reason).toContain('回收站')
+    expect(asked[0].reason).toContain('/ws/sub/a.tmp')
   })
 })
 

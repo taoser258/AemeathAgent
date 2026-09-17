@@ -10,8 +10,16 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import type { ApiProtocol, AppConfig, ChatMode, ModelProfile, SettingsPatch } from '@shared/types'
+import type {
+  ApiProtocol,
+  AppConfig,
+  ChatMode,
+  ModelProfile,
+  ReasoningEffort,
+  SettingsPatch
+} from '@shared/types'
 import { MODEL_PRESETS, matchPresetByBaseUrl, presetToProfile } from '@shared/model-presets'
+import { isReasoningAdapterId } from '@shared/reasoning-adapters'
 import { isValidNamespace } from '@shared/mcp-presets'
 
 export const APP_CONFIG_FILE = 'app.json'
@@ -29,7 +37,8 @@ export const DEFAULT_APP_CONFIG: AppConfig = (() => {
       model: active.model,
       temperature: 0.8,
       profiles,
-      activeId: active.id
+      activeId: active.id,
+      visionProfileId: ''
     },
     persona: { active: 'aemeath' },
     pet: { x: null, y: null, clickThrough: false, scale: 0.5 },
@@ -45,6 +54,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = (() => {
     privacy: { activeWindow: false, memory: false },
     appearance: { theme: 'light' },
     ui: { notesCard: false },
+    chat: { autoCompact: true },
     user: { nickname: '', avatar: null, about: '' }
   }
 })()
@@ -63,6 +73,28 @@ function sanitizeProfile(raw: unknown): ModelProfile | null {
     typeof r.context === 'number' && Number.isFinite(r.context) && r.context >= 0
       ? Math.floor(r.context)
       : 0
+  // P8-T4：输出上限与思考档位（只增不改的字段，旧配置缺省即无）
+  const maxOutput =
+    typeof r.maxOutput === 'number' && Number.isFinite(r.maxOutput) && r.maxOutput > 0
+      ? Math.floor(r.maxOutput)
+      : undefined
+  const levels = Array.isArray(r.reasoningLevels)
+    ? (r.reasoningLevels.filter(
+        (v): v is Exclude<ReasoningEffort, 'default'> =>
+          v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max'
+      ) as ReasoningEffort[])
+    : []
+  const effort: ReasoningEffort | undefined =
+    r.reasoningEffort === 'default' ||
+    r.reasoningEffort === 'low' ||
+    r.reasoningEffort === 'medium' ||
+    r.reasoningEffort === 'high' ||
+    r.reasoningEffort === 'xhigh' ||
+    r.reasoningEffort === 'max'
+      ? r.reasoningEffort
+      : undefined
+  // P9-T1：思考参数风格只认白名单（脏值丢弃 = 自动识别）
+  const adapter = isReasoningAdapterId(r.reasoningAdapter) ? r.reasoningAdapter : undefined
   return {
     id: r.id.trim(),
     name: typeof r.name === 'string' && r.name.trim() !== '' ? r.name.trim() : r.id.trim(),
@@ -70,7 +102,11 @@ function sanitizeProfile(raw: unknown): ModelProfile | null {
     baseUrl: r.baseUrl.trim(),
     model: r.model.trim(),
     context,
-    multimodal: r.multimodal === true
+    ...(maxOutput !== undefined ? { maxOutput } : {}),
+    multimodal: r.multimodal === true,
+    ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+    ...(levels.length > 0 ? { reasoningLevels: levels } : {}),
+    ...(adapter !== undefined ? { reasoningAdapter: adapter } : {})
   }
 }
 
@@ -215,7 +251,11 @@ export function mergeAppConfig(raw: unknown): AppConfig {
       model: mirror.model,
       temperature: num(model?.temperature, DEFAULT_APP_CONFIG.model.temperature),
       profiles,
-      activeId
+      activeId,
+      // 视觉档案（P8-T3）：脏值/缺失一律回到 '' = 自动。
+      // 不校验 id 是否存在——档案被删后回退自动是更合理的行为（对应 pickVisionProfile 的 ③）
+      visionProfileId:
+        typeof model?.visionProfileId === 'string' ? model.visionProfileId.trim() : ''
     },
     persona: {
       active:
@@ -276,6 +316,10 @@ export function mergeAppConfig(raw: unknown): AppConfig {
     ui: {
       // 界面偏好：仅显式 true 才开，缺失/脏值回退关（隐私同款纪律）
       notesCard: uiRaw?.notesCard === true
+    },
+    chat: {
+      // 自动压缩：缺省**开**（治长会话撞内容审核与成本）；只有显式 false 才关
+      autoCompact: (source.chat as { autoCompact?: unknown } | undefined)?.autoCompact !== false
     },
     user: sanitizeUser(source.user)
   }
@@ -479,6 +523,13 @@ export function applySettingsPatch(current: AppConfig, patch: SettingsPatch): Ap
     }
   }
 
+  if (p.chat !== undefined) {
+    // 聊天行为（P8-T1）：布尔才接受；缺省不动（缺省值在 merge 里 = 开）
+    if (typeof p.chat.autoCompact === 'boolean') {
+      next.chat.autoCompact = p.chat.autoCompact
+    }
+  }
+
   if (p.user !== undefined) {
     // 用户个人信息（反馈批次④）：与现值合并后再过防御校验——只传 nickname 就只动昵称，
     // 头像传 null 即清空（sanitizeUser 会把非 data:image 的值一律归为 null）
@@ -540,6 +591,10 @@ export function applySettingsPatch(current: AppConfig, patch: SettingsPatch): Ap
     if (active !== undefined) {
       next.model.baseUrl = active.baseUrl
       next.model.model = active.model
+    }
+    // 视觉档案（P8-T3）：只接受字符串，缺省不动（'' = 自动 / 'off' = 关闭 / 档案 id）
+    if (typeof m.visionProfileId === 'string') {
+      next.model.visionProfileId = m.visionProfileId.trim()
     }
   }
 

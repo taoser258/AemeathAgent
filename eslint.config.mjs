@@ -6,7 +6,10 @@ import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 
 export default defineConfig(
-  { ignores: ['**/node_modules', '**/dist', '**/out', '**/electron.vite.config.*.mjs'] },
+  // release*/ 是 electron-builder 的解包产物（win-unpacked 内 ~100 个打包后的 JS），
+  // .gitignore 早有 release*/ 但 eslint 的 ignores 漏了——全量 lint 会把它们也扫一遍，
+  // 实测平白慢十倍以上（owner 反馈"lint 等半天"的第二成因，第一是后台孤儿进程）。
+  { ignores: ['**/node_modules', '**/dist', '**/out', '**/electron.vite.config.*.mjs', 'release*/'] },
   tseslint.configs.recommended,
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat['jsx-runtime'],

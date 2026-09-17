@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   attachmentNote,
+  imageVerificationNote,
   llmTurnsToPersisted,
   projectPersistedHistory,
   trimHistoryForRequest,
@@ -121,6 +122,29 @@ describe('projectPersistedHistory（持久化 → LLM 投影）', () => {
     expect(pdf).toContain('本地路径：/tmp/论文.pdf')
     expect(pdf).toContain('不要为此搜索磁盘')
     expect(attachmentNote({ name: '旧版.doc', kind: 'file' })).toContain('另存为 .docx')
+  })
+})
+
+describe('imageVerificationNote（P7-T4 视觉核对提示）', () => {
+  it('单图/多图文案单复数正确', () => {
+    expect(imageVerificationNote(1)).toContain('这张图片')
+    expect(imageVerificationNote(3)).toContain('这 3 张图片')
+  })
+
+  it('三条硬约束都在：标"识别" / 关键信息核对 / 看不清不许猜', () => {
+    const note = imageVerificationNote(1)
+    expect(note).toContain('根据图片识别')
+    expect(note).toContain('复述确认')
+    expect(note).toContain('禁止猜测')
+  })
+
+  it('★ 多模态直看图 ≠ 转述（owner 实测：措辞写错导致她去找文件/调 OCR）', () => {
+    const note = imageVerificationNote(1)
+    expect(note).toContain('你已直接看到')
+    expect(note).not.toContain('转述给你')
+    // 聊天图片没有磁盘路径：禁止找文件、禁止对它调两个识图工具
+    expect(note).toContain('没有磁盘路径')
+    expect(note).toContain('describe_image / ocr_image')
   })
 })
 

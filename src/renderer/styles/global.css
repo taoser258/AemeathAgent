@@ -662,6 +662,13 @@ button {
   color: var(--text-secondary);
 }
 
+/* 表单内联警告（如上下文窗口小于固定占用）：危险色但不刺眼，深浅主题各一套变量 */
+.settings-field-warn {
+  color: var(--danger);
+  display: block;
+  margin-top: 4px;
+}
+
 .settings-badge {
   font-size: 11px;
   font-weight: 600;
@@ -684,6 +691,9 @@ button {
   padding: 8px 12px;
   border-radius: 10px;
   outline: none;
+  /* 全仓没有全局 border-box 重置：不设这行，width:100% + padding/border 会让
+     输入框比玻璃卡内容区宽出 26px，两侧顶穿卡片边框（模型编辑页实测） */
+  box-sizing: border-box;
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease;

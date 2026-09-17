@@ -8,11 +8,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AppConfig,
   ModelProfile,
+  ReasoningAdapterId,
+  ReasoningEffort,
   SessionMeta,
   TokenUsageResult,
   UpdateStatus
 } from '@shared/types'
 import { MODEL_PRESETS } from '@shared/model-presets'
+import { pickVisionProfile, visionUnavailableHint } from '@shared/vision-pick'
+import { REASONING_LABELS, REASONING_LEVELS } from '@shared/reasoning'
+import {
+  ADAPTER_LABELS,
+  adapterFoldedLevels,
+  adapterLevelsHint,
+  resolveReasoningAdapter
+} from '@shared/reasoning-adapters'
 import { APP_FOOTER_LABEL, APP_STAGE_LABEL } from '@shared/version'
 import { APP_NAME } from '@shared/brand'
 import WindowControls from '../WindowControls'
@@ -24,16 +34,20 @@ import logoGlm from '../assets/vendor/p-glm.png'
 import logoQwen from '../assets/vendor/p-qwen.png'
 import logoKimi from '../assets/vendor/p-kimi.png'
 import logoDoubao from '../assets/vendor/p-doubao.png'
+import logoMimo from '../assets/vendor/p-mimo.png'
+import logoMinimax from '../assets/vendor/p-minimax.png'
 import logoClaude from '../assets/vendor/p-claude.png'
 import logoGemini from '../assets/vendor/p-gemini.png'
 
-/** 预设档案的官方 logo（LobeHub Icons，来源见 assets/vendor/）；自定义档案走字母头像 */
+/** 预设档案的官方 logo（多取自 LobeHub Icons；MiMo 由官方 wordmark 反相去背处理，来源见 assets/vendor/）；自定义档案走字母头像 */
 const VENDOR_LOGOS: Record<string, string> = {
   'p-deepseek': logoDeepseek,
   'p-glm': logoGlm,
   'p-qwen': logoQwen,
   'p-kimi': logoKimi,
   'p-doubao': logoDoubao,
+  'p-mimo': logoMimo,
+  'p-minimax': logoMinimax,
   'p-claude': logoClaude,
   'p-gemini': logoGemini
 }
@@ -130,9 +144,11 @@ function AppearanceSection(): React.JSX.Element {
   )
 }
 
-/** 记忆分区：总开关（privacy.memory，默认关）+ 条目管理（删除/清空）。
- * 条目删除/清空走专用 IPC（主进程先快照再改，误删可从 backups 找回）。 */
+/** 记忆分区：总开关（privacy.memory，默认关）+ 条目管理（编辑/删除/清空）。
+ * 条目编辑/删除/清空走专用 IPC（主进程先快照再改，误操作可从 backups 找回）。 */
 const KIND_LABEL: Record<string, string> = { preference: '偏好', fact: '事实', commitment: '承诺' }
+/** 单条记忆正文上限（与 shared/memory MEMORY_CONTENT_MAX 同口径） */
+const MEMORY_EDIT_MAX = 120
 
 interface MemoryItem {
   id: string
@@ -146,12 +162,21 @@ function MemorySection(): React.JSX.Element {
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [items, setItems] = useState<MemoryItem[] | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  // 编辑态：editingId=正在改的条目；draft=草稿；savingId=保存中（失败也要复位，Day10 教训）
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [editError, setEditError] = useState('')
+
+  const refresh = (): void => {
+    void window.petAPI.memoryList().then(setItems)
+  }
 
   useEffect(() => {
     void window.petAPI.getConfig().then((config) => {
       setEnabled(config.privacy?.memory === true)
     })
-    void window.petAPI.memoryList().then(setItems)
+    refresh()
   }, [])
 
   const handleToggle = async (): Promise<void> => {
@@ -173,6 +198,43 @@ function MemorySection(): React.JSX.Element {
     await window.petAPI.memoryClear()
     setItems([])
     setConfirmClear(false)
+  }
+
+  const startEdit = (it: MemoryItem): void => {
+    setEditingId(it.id)
+    setDraft(it.content)
+    setEditError('')
+  }
+
+  const cancelEdit = (): void => {
+    setEditingId(null)
+    setDraft('')
+    setEditError('')
+  }
+
+  const saveEdit = async (id: string): Promise<void> => {
+    const text = draft.trim()
+    if (text === '') {
+      setEditError('内容不能为空')
+      return
+    }
+    setSavingId(id)
+    setEditError('')
+    try {
+      const res = await window.petAPI.memoryUpdate(id, text)
+      if (!res.ok) {
+        setEditError(res.error ?? '保存失败')
+        return
+      }
+      // 主进程刷了 updatedAt 且列表按它倒序——重新拉取，顺序天然正确
+      refresh()
+      cancelEdit()
+    } catch {
+      setEditError('保存失败，请重试')
+    } finally {
+      // 成功失败都要复位 busy，一次 IPC 失败不能把按钮打死（Day10 教训）
+      setSavingId(null)
+    }
   }
 
   return (
@@ -211,7 +273,9 @@ function MemorySection(): React.JSX.Element {
           <div className="settings-row">
             <span className="settings-row-label">
               已记住 {items.length} 条
-              <span className="settings-row-sub">按最近更新排序；点 × 删除单条。</span>
+              <span className="settings-row-sub">
+                按最近更新排序；可编辑改正文，点 × 删除单条。
+              </span>
             </span>
             {confirmClear ? (
               <span style={{ display: 'flex', gap: 8 }}>
@@ -240,37 +304,105 @@ function MemorySection(): React.JSX.Element {
               </button>
             )}
           </div>
-          {items.map((it) => (
-            <div key={it.id} className="settings-row">
-              <span className="settings-row-label">
-                <span
-                  style={{
-                    display: 'inline-block',
-                    marginRight: 8,
-                    padding: '1px 8px',
-                    borderRadius: 999,
-                    fontSize: 11,
-                    background: 'rgba(240,103,158,0.12)',
-                    color: 'var(--accent)'
+          {items.map((it) =>
+            editingId === it.id ? (
+              <div key={it.id} className="settings-field memory-edit">
+                <span className="settings-field-label">
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      marginRight: 8,
+                      padding: '1px 8px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      background: 'rgba(240,103,158,0.12)',
+                      color: 'var(--accent)'
+                    }}
+                  >
+                    {KIND_LABEL[it.kind] ?? it.kind}
+                  </span>
+                  编辑这条记忆
+                </span>
+                <textarea
+                  className="settings-textarea"
+                  style={{ minHeight: 84 }}
+                  value={draft}
+                  maxLength={MEMORY_EDIT_MAX}
+                  autoFocus
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Esc 取消；Ctrl/Cmd+Enter 保存
+                    if (e.key === 'Escape') cancelEdit()
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void saveEdit(it.id)
                   }}
-                >
-                  {KIND_LABEL[it.kind] ?? it.kind}
-                </span>
-                {it.content}
+                />
                 <span className="settings-row-sub">
-                  {new Date(it.updatedAt).toLocaleString()} · 被引用 {it.hits} 次
+                  {draft.trim().length}/{MEMORY_EDIT_MAX} · Ctrl+Enter 保存，Esc 取消
                 </span>
-              </span>
-              <button
-                type="button"
-                className="settings-button"
-                title="删除这条记忆"
-                onClick={() => void handleDelete(it.id)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
+                {editError !== '' && <p className="settings-banner fail">{editError}</p>}
+                <span className="settings-actions" style={{ margin: '4px 0 0' }}>
+                  <button
+                    type="button"
+                    className="settings-button primary"
+                    disabled={savingId === it.id || draft.trim() === ''}
+                    onClick={() => void saveEdit(it.id)}
+                  >
+                    {savingId === it.id ? '保存中…' : '保存'}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-button"
+                    disabled={savingId === it.id}
+                    onClick={cancelEdit}
+                  >
+                    取消
+                  </button>
+                </span>
+              </div>
+            ) : (
+              <div key={it.id} className="settings-row">
+                <span className="settings-row-label">
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      marginRight: 8,
+                      padding: '1px 8px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      background: 'rgba(240,103,158,0.12)',
+                      color: 'var(--accent)'
+                    }}
+                  >
+                    {KIND_LABEL[it.kind] ?? it.kind}
+                  </span>
+                  {it.content}
+                  <span className="settings-row-sub">
+                    {new Date(it.updatedAt).toLocaleString()} · 被引用 {it.hits} 次
+                  </span>
+                </span>
+                <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="settings-button"
+                    title="编辑这条记忆"
+                    disabled={editingId !== null}
+                    onClick={() => startEdit(it)}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-button"
+                    title="删除这条记忆"
+                    disabled={editingId !== null}
+                    onClick={() => void handleDelete(it.id)}
+                  >
+                    ×
+                  </button>
+                </span>
+              </div>
+            )
+          )}
         </>
       )}
       {items !== null && items.length === 0 && (
@@ -378,6 +510,11 @@ function PetSection(): React.JSX.Element {
 function newProfileId(): string {
   return `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
+
+/** 上下文窗口快捷预设（P8-T4 图一）：常用量级一键填入，省得手打 6 位数字 */
+const CONTEXT_PRESETS = [32 * 1024, 64 * 1024, 128 * 1024, 256 * 1024]
+/** 输出上限快捷预设：与输入分开（输出给多了只是浪费额度，给少了会被截断） */
+const OUTPUT_PRESETS = [8 * 1024, 16 * 1024, 32 * 1024, 64 * 1024]
 
 /**
  * 把图片 dataURL 等比压到 ≤max 边的 PNG dataURL。
@@ -794,6 +931,10 @@ function ModelSection(): React.JSX.Element {
   const [profiles, setProfiles] = useState<ModelProfile[]>([])
   const [activeId, setActiveId] = useState('')
   const [temperature, setTemperature] = useState(0.8)
+  /** 视觉档案（P8-T3）：'' = 自动 / 'off' = 不做转述 / 档案 id */
+  const [visionProfileId, setVisionProfileId] = useState('')
+  /** 上下文自动压缩（P8-T1，全局开关；缺省开） */
+  const [autoCompact, setAutoCompact] = useState(true)
   const [personas, setPersonas] = useState<string[]>([])
   const [activePersona, setActivePersona] = useState('aemeath')
   const [keyedIds, setKeyedIds] = useState<string[]>([])
@@ -817,6 +958,8 @@ function ModelSection(): React.JSX.Element {
       setProfiles(res.config.model.profiles)
       setActiveId(res.config.model.activeId)
       setTemperature(res.config.model.temperature)
+      setVisionProfileId(res.config.model.visionProfileId)
+      setAutoCompact(res.config.chat.autoCompact)
       setPersonas(res.personas)
       setActivePersona(res.config.persona.active)
       setKeyedIds(res.keyedProfileIds)
@@ -824,13 +967,21 @@ function ModelSection(): React.JSX.Element {
     })
   }, [])
 
+  /**
+   * 滚动到编辑器——**只在打开/切换档案的瞬间**（owner 实测 bug：依赖写 [draft]，
+   * 而每次击键 setDraft({...}) 都是新对象引用 → 每敲一个字都 smooth scroll 一次，
+   * 页面持续往上滚；编辑器里所有输入框（昵称/URL/模型名/数字框）全部中招）。
+   * 用 ref 记住上次滚到的档案 id：内容变化（id 不变）不滚，关闭后重开才再滚。
+   */
+  const editorScrolledId = useRef<string | null>(null)
   useEffect(() => {
-    if (draft !== null) {
+    if (draft !== null && editorScrolledId.current !== draft.id) {
       // 等 DOM 渲染完再滚，编辑器顶部对齐可视区顶部
       window.requestAnimationFrame(() => {
         editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
     }
+    editorScrolledId.current = draft === null ? null : draft.id
   }, [draft])
 
   const flashNotice = (message: string): void => {
@@ -868,6 +1019,28 @@ function ModelSection(): React.JSX.Element {
     void persist(profiles, activeId, value)
   }
 
+  /** 视觉档案（P8-T3）：独立于档案表的全局设置，写完读回同步（约定：写配置一律读回） */
+  const handleVisionProfileChange = (id: string): void => {
+    setVisionProfileId(id) // 乐观更新：下拉不等待网络
+    void window.petAPI
+      .settingsSet({ model: { visionProfileId: id } })
+      .then((res) => setVisionProfileId(res.model.visionProfileId))
+      .catch(() => flashNotice('视觉档案保存失败'))
+  }
+
+  /** 自动压缩开关（P8-T1）：乐观更新 + 读回同步；失败回滚并提示 */
+  const toggleAutoCompact = async (): Promise<void> => {
+    const next = !autoCompact
+    setAutoCompact(next)
+    try {
+      const res = await window.petAPI.settingsSet({ chat: { autoCompact: next } })
+      setAutoCompact(res.chat.autoCompact)
+    } catch {
+      setAutoCompact(!next)
+      flashNotice('自动压缩开关保存失败')
+    }
+  }
+
   const startAdd = (): void => {
     const id = newProfileId()
     setDraft({
@@ -891,11 +1064,52 @@ function ModelSection(): React.JSX.Element {
     setTestResult(null)
   }
 
+  /** 编辑器里的档位视图（P8-T4）：只列该档案勾选的档位，按强度顺序 */
+  const levels = REASONING_LEVELS.filter((l) => (draft?.reasoningLevels ?? []).includes(l))
+  const levelCount = levels.length
+  /**
+   * 当前生效的思考参数风格（P9-T1）：手动覆盖优先，否则按 Base URL 自动识别。
+   * 仅 openai 兼容协议有意义；anthropic/gemini 走各自原生预算映射。
+   */
+  const draftAdapter: ReasoningAdapterId | null =
+    draft !== null && draft.protocol === 'openai'
+      ? resolveReasoningAdapter({
+          baseUrl: draft.baseUrl,
+          ...(draft.reasoningAdapter !== undefined ? { override: draft.reasoningAdapter } : {})
+        })
+      : null
+  /** 该风格（+型号）下会被折算的档：chip 变灰提示，勾选数据不动 */
+  const foldedLevels =
+    draftAdapter !== null
+      ? new Set(adapterFoldedLevels(draftAdapter, draft?.model ?? ''))
+      : new Set()
+  /** 勾选的档里是否含会被折算的 —— 提示行用 */
+  const hasFolded = levels.some((l) => foldedLevels.has(l))
+
   const closeEditor = (): void => {
     setDraft(null)
     setIsNewDraft(false)
     setKeyInput('')
     setTestResult(null)
+  }
+
+  const toggleLevel = (level: ReasoningEffort): void => {
+    if (draft === null) return
+    const cur = draft.reasoningLevels ?? []
+    const next = cur.includes(level) ? cur.filter((l) => l !== level) : [...cur, level]
+    // 保持强度顺序（滑条与下拉都按这个顺序）
+    const ordered = REASONING_LEVELS.filter((l) => next.includes(l))
+    // 默认档位必须还在支持列表里，否则回退首项（不留"选了但发不出去"的悬空状态）
+    const effort = draft.reasoningEffort
+    const fixedEffort =
+      effort !== undefined && effort !== 'default' && !ordered.includes(effort)
+        ? ordered[0]
+        : draft.reasoningEffort
+    setDraft({
+      ...draft,
+      ...(ordered.length > 0 ? { reasoningLevels: ordered } : { reasoningLevels: undefined }),
+      ...(fixedEffort !== undefined ? { reasoningEffort: fixedEffort } : {})
+    })
   }
 
   const saveDraft = async (): Promise<void> => {
@@ -914,7 +1128,36 @@ function ModelSection(): React.JSX.Element {
       model,
       // 协议以编辑器下拉为准（ 修复：此处曾写死 'openai'——预设档案点一次
       // 「编辑→保存」协议就被冲掉，之后聊天全打错端点； 起潜伏）
-      context: Number.isFinite(draft.context) && draft.context > 0 ? Math.floor(draft.context) : 0
+      context: Number.isFinite(draft.context) && draft.context > 0 ? Math.floor(draft.context) : 0,
+      // P8-T4：输出上限非正数 = 未设置；档位按强度顺序归一，空表 = 不支持思考
+      maxOutput:
+        typeof draft.maxOutput === 'number' &&
+        Number.isFinite(draft.maxOutput) &&
+        draft.maxOutput > 0
+          ? Math.floor(draft.maxOutput)
+          : undefined,
+      reasoningLevels: REASONING_LEVELS.filter((l) => (draft.reasoningLevels ?? []).includes(l)),
+      reasoningEffort:
+        draft.reasoningEffort !== undefined && draft.reasoningEffort !== 'default'
+          ? draft.reasoningEffort
+          : 'default',
+      // P9-T1：思考参数风格；'auto'/非 openai 协议都不持久化（=按 Base URL 自动识别）
+      reasoningAdapter:
+        draft.protocol === 'openai' && draft.reasoningAdapter !== undefined
+          ? draft.reasoningAdapter
+          : undefined
+    }
+    if (cleaned.reasoningLevels?.length === 0) delete cleaned.reasoningLevels
+    if (cleaned.maxOutput === undefined) delete cleaned.maxOutput
+    if (cleaned.reasoningAdapter === undefined) delete cleaned.reasoningAdapter
+    // 保存前再兜一次：默认档位若已不在支持列表里 → 回退首项（UI 里已处理，防手改配置绕过）
+    const lv = cleaned.reasoningLevels
+    if (
+      cleaned.reasoningEffort !== undefined &&
+      cleaned.reasoningEffort !== 'default' &&
+      (lv === undefined || !lv.includes(cleaned.reasoningEffort))
+    ) {
+      cleaned.reasoningEffort = lv !== undefined && lv.length > 0 ? lv[0] : 'default'
     }
     const exists = profiles.some((p) => p.id === cleaned.id)
     const nextProfiles = exists
@@ -972,6 +1215,25 @@ function ModelSection(): React.JSX.Element {
   const hasKey = (id: string): boolean => keyedIds.includes(id)
 
   /**
+   * 「现在到底谁在替她看图」（P8-T3 反馈）：用**与主进程同一份**选档逻辑算出来，
+   * 而不是渲染层自己猜——否则会出现"设置里显示用 A、实际用了 B"这种最难查的偏差。
+   */
+  const visionPick = pickVisionProfile({ profiles, activeId, visionProfileId, hasKey })
+  const activeName = profiles.find((p) => p.id === activeId)?.name ?? '当前档案'
+  const visionNow = ((): string => {
+    if (!visionPick.ok) {
+      // 「不做转述」是用户主动选的、不是错误，用大白话说明；其余三种是真问题，给可操作原因
+      if (visionPick.reason === 'off') {
+        return '现在不做转述：图片发过去她只会如实说「我看不到图」。'
+      }
+      return visionUnavailableHint(visionPick.reason)
+    }
+    return visionPick.profile.id === activeId
+      ? `现在用「${visionPick.profile.name}」自己看图——它已开多模态，图片直接发给她，不经过转述。`
+      : `现在用「${visionPick.profile.name}」替她看图——图片先发给它转述成文字，再交给「${activeName}」。`
+  })()
+
+  /**
    * 上下文/多模态徽章可见性：
    * 未接入 API Key 的预设档案保持极简——只有手动改过上下文才展示；
    * 配了密钥（真实在用）或自定义档案则照常展示。
@@ -991,8 +1253,8 @@ function ModelSection(): React.JSX.Element {
         <div>
           <div className="settings-card-title">模型接入</div>
           <div className="settings-card-desc">
-            支持多档案并存：DeepSeek / GLM / 千问 / Kimi / 豆包 预置，可添加任意 OpenAI
-            兼容自定义模型。
+            支持多档案并存：DeepSeek / GLM / 千问 / Kimi / 豆包 / MiMo / MiniMax 预置，可添加任意
+            OpenAI 兼容自定义模型。
           </div>
         </div>
       </div>
@@ -1105,6 +1367,89 @@ function ModelSection(): React.JSX.Element {
         </button>
       </div>
 
+      {/* 上下文压缩（P8-T1）：全局行为开关 */}
+      <div className="settings-card">
+        <div className="settings-card-head">
+          <span className="settings-card-icon">🗜️</span>
+          <div>
+            <div className="settings-card-title">上下文压缩</div>
+            <div className="settings-card-desc">
+              会话接近模型窗口时，把更早的对话摘要成一段转述，长任务不再丢前文、也更省钱。
+            </div>
+          </div>
+        </div>
+        <div className="settings-row">
+          <span className="settings-row-label">
+            自动压缩（默认开）
+            <span className="settings-row-sub">
+              只压缩「发给模型的视图」——会话原文一条不删，回看与搜索仍是原文；压缩时会在气泡下说明一次。
+              判断依据是上次请求的真实用量，所以档案的「上下文窗口」填 0（未设置）时不生效。
+              也可以在输入框右侧的上下文用量浮层里手动压一次。
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoCompact}
+            className={autoCompact ? 'switch on' : 'switch'}
+            onClick={() => void toggleAutoCompact()}
+          >
+            <span className="switch-knob" />
+          </button>
+        </div>
+      </div>
+
+      {/* 视觉档案（P8-T3）：当前模型不开多模态时，谁替它"看图" */}
+      <div className="settings-card">
+        <div className="settings-card-head">
+          <span className="settings-card-icon">👁️</span>
+          <div>
+            <div className="settings-card-title">识图（视觉档案）</div>
+            <div className="settings-card-desc">
+              当前模型看不到图片时，让一个支持图片的档案替它「转述」成文字。
+            </div>
+          </div>
+        </div>
+        <div className="settings-field">
+          <label className="settings-field-label" htmlFor="vision-profile">
+            谁替她看图
+          </label>
+          <select
+            id="vision-profile"
+            className="settings-input"
+            value={visionProfileId}
+            onChange={(e) => handleVisionProfileChange(e.target.value)}
+            disabled={!loaded}
+          >
+            <option value="">自动（推荐）：她自己能看图就直接看，看不到才自动挑一个</option>
+            <option value="off">不做转述：看不到就如实告诉你</option>
+            {profiles
+              .filter((p) => p.multimodal)
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {`固定用它看图：${p.name}${hasKey(p.id) ? '' : '（没配密钥，选它也没用）'}`}
+                </option>
+              ))}
+          </select>
+          {/* 实时结论（与主进程同一份选档逻辑算出来）：省得用户在 4 个选项里猜 */}
+          <span className="settings-field-sub">{visionNow}</span>
+        </div>
+        <div className="settings-field">
+          <span className="settings-field-sub">
+            三个选项的区别：<b>自动</b> = 让她自己看（能看就自己看，看不到就替你挑一个能看的）；
+            <b>不做转述</b> = 不许别人替她看，她只能告诉你「看不到」；
+            <b>固定用它看图</b> = 不许自动挑，永远由你指定的这个档案转述。
+            <br />
+            转述只在当前档案没开多模态时才发生（她自己能看到图时，图片直接发给她）。
+            被转述的图只会发给你自己配置的那个档案；转述结果当文字交给她，回复里会标明
+            「根据图片识别」，关键数字仍建议你核对原图。
+            <br />
+            下拉里只列出<b>已开启多模态</b>的档案；
+            想让某个档案也能当眼睛，到上面的档案列表点「编辑」、勾上「开启多模态」并配好密钥即可。
+          </span>
+        </div>
+      </div>
+
       {/* 编辑器 */}
       {draft !== null ? (
         <div className="profile-editor" ref={editorRef}>
@@ -1146,14 +1491,51 @@ function ModelSection(): React.JSX.Element {
             </span>
           </div>
 
+          {/* 思考参数风格（P9-T1，仅 OpenAI 兼容）：默认按 Base URL 自动识别厂商，可手动覆盖 */}
+          {draft.protocol === 'openai' ? (
+            <div className="settings-field">
+              <label className="settings-field-label" htmlFor="pf-adapter">
+                思考参数风格
+              </label>
+              <select
+                id="pf-adapter"
+                className="settings-select"
+                value={draft.reasoningAdapter ?? 'auto'}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    reasoningAdapter:
+                      e.target.value === 'auto' ? undefined : (e.target.value as ReasoningAdapterId)
+                  })
+                }
+              >
+                <option value="auto">
+                  自动（按接入地址识别为{draftAdapter !== null ? ADAPTER_LABELS[draftAdapter] : ''}
+                  ）
+                </option>
+                {(Object.keys(ADAPTER_LABELS) as ReasoningAdapterId[]).map((id) => (
+                  <option key={id} value={id}>
+                    {ADAPTER_LABELS[id]}
+                  </option>
+                ))}
+              </select>
+              <span className="settings-field-sub">
+                {draft.reasoningAdapter === undefined && draftAdapter !== null
+                  ? `已按 Base URL 识别为「${ADAPTER_LABELS[draftAdapter]}」；中转网关识别不准时可在此手动指定。`
+                  : '手动指定后按该厂商规则发送思考参数；选「自动」恢复按接入地址识别。'}
+              </span>
+            </div>
+          ) : null}
+
           <div className="settings-field">
             <label className="settings-field-label" htmlFor="pf-effort">
-              思考强度
+              默认思考强度
             </label>
             <select
               id="pf-effort"
               className="settings-select"
               value={draft.reasoningEffort ?? 'default'}
+              disabled={levelCount === 0}
               onChange={(e) =>
                 setDraft({
                   ...draft,
@@ -1161,15 +1543,53 @@ function ModelSection(): React.JSX.Element {
                 })
               }
             >
-              <option value="default">默认（不额外传参，跟随模型自身行为）</option>
-              <option value="low">低（更快更省，推理较浅）</option>
-              <option value="medium">中</option>
-              <option value="high">高（更慢更贵，推理更深）</option>
+              <option value="default">自动（使用请求层默认值）</option>
+              {levels.map((l) => (
+                <option key={l} value={l}>
+                  {REASONING_LABELS[l]}
+                </option>
+              ))}
             </select>
+            {levelCount === 0 ? (
+              <span className="settings-field-sub">
+                先勾选下面的「支持的思考强度」——没勾就是该模型不吃思考参数，这里无从选。
+              </span>
+            ) : null}
+          </div>
+
+          {/* 支持档位多选（P8-T4）：勾了哪些，聊天区右键模型时就能在哪些档位之间拖 */}
+          <div className="settings-field">
+            <label className="settings-field-label">支持的思考强度</label>
+            <div className="level-grid">
+              {REASONING_LEVELS.map((l) => {
+                const on = levels.includes(l)
+                // P9-T1：该厂商/型号会折算的档灰显（仍可勾，发送时按厂商规则折算，不拦对话）
+                const folded = draft.protocol === 'openai' && foldedLevels.has(l)
+                return (
+                  <button
+                    key={l}
+                    type="button"
+                    aria-pressed={on}
+                    className={on ? 'level-chip on' : 'level-chip'}
+                    style={{ opacity: folded ? 0.62 : 1 }}
+                    title={
+                      folded && draftAdapter !== null
+                        ? adapterLevelsHint(draftAdapter, draft.model)
+                        : undefined
+                    }
+                    onClick={() => toggleLevel(l)}
+                  >
+                    {on ? '✓ ' : ''}
+                    {REASONING_LABELS[l]}
+                  </button>
+                )
+              })}
+            </div>
             <span className="settings-field-sub">
-              OpenAI 兼容端点映射 reasoning_effort；Claude 走 extended thinking 预算（低 4K/中
-              10K/高 20K，期间温度固定 1）；Gemini 走 thinkingBudget（低 1K/中 8K/高 24K）。
-              不支持的模型会忽略此设置。
+              {draft.protocol === 'openai' && draftAdapter !== null
+                ? adapterLevelsHint(draftAdapter, draft.model)
+                : 'Anthropic / Gemini 原生协议按思考预算 token 发送，五档均可使用。'}
+              {hasFolded ? ' 勾选变灰的档位不会丢失，发送时自动折算，不会把对话拦下来。' : ''}
             </span>
           </div>
 
@@ -1207,7 +1627,7 @@ function ModelSection(): React.JSX.Element {
 
           <div className="settings-field">
             <label className="settings-field-label" htmlFor="pf-context">
-              上下文窗口（tokens）
+              输入（上下文窗口，tokens）
             </label>
             <input
               id="pf-context"
@@ -1219,8 +1639,79 @@ function ModelSection(): React.JSX.Element {
               onChange={(e) => setDraft({ ...draft, context: Number(e.target.value) })}
               spellCheck={false}
             />
+            <div className="preset-row">
+              {CONTEXT_PRESETS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className="preset-chip"
+                  onClick={() => setDraft({ ...draft, context: n })}
+                >
+                  {n / 1024}K
+                </button>
+              ))}
+              <button
+                type="button"
+                className="preset-chip"
+                onClick={() => setDraft({ ...draft, context: 0 })}
+              >
+                清空
+              </button>
+            </div>
             <span className="settings-field-sub">
-              用于自动裁剪聊天历史，防止超出模型窗口。不确定就填 0。
+              模型的输入上限：用于裁剪聊天历史、也决定「上下文压缩」何时触发。不确定就填
+              0（不裁剪）。注意光人设与工具说明就有约 15K 的固定占用（对话模式无工具约 5K）——
+              这部分压缩也省不掉，窗口填得比它小会每次请求都超限；多数模型建议 32K 以上。
+            </span>
+            {draft.context > 0 && draft.context < 8192 ? (
+              <span className="settings-field-sub settings-field-warn">
+                ⚠ 当前值小于固定占用（约 15K，对话模式约 5K）：工作/学习模式下大概率每次请求都超限，
+                用量环会一直红色。
+              </span>
+            ) : null}
+          </div>
+
+          <div className="settings-field">
+            <label className="settings-field-label" htmlFor="pf-maxout">
+              输出（单次回复上限，tokens）
+            </label>
+            <input
+              id="pf-maxout"
+              className="settings-input"
+              type="number"
+              min={0}
+              step={1024}
+              value={draft.maxOutput ?? 0}
+              onChange={(e) => {
+                const v = Number(e.target.value)
+                // 0 = 清空（不发该参数）：与"输入"同一套交互口径，免得出现两处空值语义
+                setDraft({ ...draft, maxOutput: v > 0 ? v : undefined })
+              }}
+              spellCheck={false}
+            />
+            <div className="preset-row">
+              {OUTPUT_PRESETS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className="preset-chip"
+                  onClick={() => setDraft({ ...draft, maxOutput: n })}
+                >
+                  {n / 1024}K
+                </button>
+              ))}
+              <button
+                type="button"
+                className="preset-chip"
+                onClick={() => setDraft({ ...draft, maxOutput: undefined })}
+              >
+                清空
+              </button>
+            </div>
+            <span className="settings-field-sub">
+              留空（0）= 不发送该参数，交给模型默认值（推荐）。 填了才会发出去：Claude 走
+              max_tokens（开思考时它必须大于思考预算）、Gemini 走 maxOutputTokens、其余兼容端点走
+              max_tokens。
             </span>
           </div>
 
@@ -1228,7 +1719,7 @@ function ModelSection(): React.JSX.Element {
             <span className="settings-row-label">
               开启多模态
               <span className="settings-row-sub">
-                标记该模型支持图像输入（视觉能力在 P2 版本接入）。
+                标记该模型支持图像输入（能直接看图）。没开的模型可以靠上面的「视觉档案」代看。
               </span>
             </span>
             <button

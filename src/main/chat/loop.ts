@@ -85,9 +85,12 @@ export interface ToolLoopDeps {
   stepReminder?: () => string | null
   /**
    * 收尾前临时提醒（**不落盘**）：返回非空则**不结束本轮**，注入后继续——每次 run 只给一次。
-   * 用途：清单还有做完却没打勾的项就收尾时，催她先同步清单再汇报。
+   * finalText = 模型这一轮打算作为最终回复的全文（催办判定要用它）。
+   * 用途①：清单还有未勾项就收尾时，催她先同步清单再汇报（chat/todo-nudge.ts）；
+   * 用途②：回复里引用了没出处的链接时，催她删掉或先 fetch_url 验证（chat/citation-guard.ts）。
+   * 调用方把两路判定聚合成一个闭包（各源各一次额度，文案拼接）。
    */
-  finishReminder?: () => string | null
+  finishReminder?: (finalText: string) => string | null
   /** 事件：即将执行工具 */
   onToolStart: (tc: ToolCallDraft) => void
   /** 事件：工具执行完毕（resultPreview 仅展示用，已截断）；status 缺省按 ok 推导 */
@@ -108,10 +111,19 @@ export interface ToolLoopDeps {
    * 渲染层在流式气泡下显示一行淡色文字——：不要光闪图标，说清正在干嘛。
    */
   onNotice?: (notice: { kind: 'auto-continue' | 'retry'; text: string; attempt: number }) => void
-  /** 步边界：本轮 assistant(+toolCalls) 与全部 tool 结果 turns 已就绪，调用方可落盘。
+  /**
+   * 步边界：本轮 assistant(+toolCalls) 与全部 tool 结果 turns 已就绪，调用方可落盘。
    * thinking = 本步模型的思考全文。
    * 此前只有最终步的思考被持久化，中间步思考全丢——历史回看时只剩堆叠的工具卡。 */
   onStepBoundary: (turns: ChatTurn[], thinking: string) => void
+  /**
+   * 请求侧压缩（P8-T1）：每轮发起请求前调用一次，给它"本次真正要发的视图"
+   * （已过 pruneToolResults），返回压缩后的视图（或原样返回）。
+   * 判定/切点/提示词都是纯逻辑（chat/compact.ts），这里只留一个挂钩；
+   * 缺省不挂 = 与旧行为完全一致（子代理与单测沿用）。
+   * 注意：压缩**只改这一份视图**，`messages` 累积体与落盘原文都不动。
+   */
+  compactView?: (view: ChatTurn[], info: { lastUsage: TokenUsage | null }) => Promise<ChatTurn[]>
 }
 
 export type ToolLoopStopReason = 'completed' | 'max-steps' | 'loop-detected' | 'aborted'
@@ -183,8 +195,11 @@ export async function runToolLoop(
   // 空收尾重试：有些模型交完工具后只吐思考、正文为空 → 用户看不到汇报。
   // 检测到「有工具动作但正文空」时，注入一条内部催办 user turn 再要一次汇报（仅一次）。
   let emptyRetried = false
-  // 收尾前清单催办：清单陈旧（做完没打勾）就再要一轮，仅一次
-  let finishReminded = false
+  // 收尾前催办额度（P7-T1 聚合器）：清单对账与引用护栏**各一次**，所以循环侧上限给 2。
+  // 此前是"整个循环只催一次"——两路判定合并进一个闭包后，谁先出声谁就独占额度，
+  // 另一路永远没机会（任务书点名的"互相挤占"）。额度归调用方聚合器管，这里只是保险丝。
+  let finishNudges = 0
+  const MAX_FINISH_NUDGES = 2
   // 分段预算：段起点轮次 + 已用续跑段数 + 截断续写次数
   let segmentStart = 0
   let autoContinues = 0
@@ -199,7 +214,17 @@ export async function runToolLoop(
 
     // 工具结果裁剪（result-pruner 同款）：请求侧投影，落盘仍是全文——
     // messages 原位累积不动，这里只把超长 tool 结果裁成头+尾再发给模型
-    const res = await deps.call(pruneToolResults(messages), signal)
+    let view = pruneToolResults(messages)
+    // 上下文压缩（P8-T1）：同样只作用于这份视图。失败一律回退未压缩视图
+    //（压缩是锦上添花，绝不能因为一次摘要调用失败就中断整轮对话）
+    if (deps.compactView !== undefined) {
+      try {
+        view = await deps.compactView(view, { lastUsage: usage ?? null })
+      } catch {
+        // 静默回退：具体原因由 compactView 内部记录（那边有日志上下文）
+      }
+    }
+    const res = await deps.call(view, signal)
     acc.rounds += 1
     acc.llmMs += res.totalMs
     acc.ttftMsLast = res.ttftMs
@@ -261,13 +286,13 @@ export async function runToolLoop(
         })
         continue
       }
-      // 收尾前的清单催办：清单与进度对不上却要收尾时，先催她同步。
-      // 与上面两条一样是"内部 user turn"，不进 onStepBoundary 的落盘批次，
-      // 所以 UI 里不会冒出假的用户气泡。只给一次，避免与模型来回拉扯。
-      if (!signal.aborted && !finishReminded) {
-        const note = deps.finishReminder?.() ?? null
+      // 收尾前的催办（清单对账 / 引用护栏聚合）：与上面两条一样是"内部 user turn"，
+      // 不进 onStepBoundary 的落盘批次，所以 UI 里不会冒出假的用户气泡。
+      // finalText 交给判定方；每源各一次额度由调用方聚合器管，这里只是保险丝。
+      if (!signal.aborted && finishNudges < MAX_FINISH_NUDGES) {
+        const note = deps.finishReminder?.(res.text) ?? null
         if (note !== null && note !== '') {
-          finishReminded = true
+          finishNudges += 1
           messages.push({ role: 'user', content: note })
           continue
         }

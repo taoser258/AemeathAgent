@@ -38,6 +38,24 @@ describe('agent/prompt · buildSystemPrompt 组装', () => {
     expect(appendix).toContain('当前时间')
   })
 
+  it('P7-T5：事实分级段——三档措辞 / 时效数据核实 / 不确定明说 / 链接只来自工具', () => {
+    const a = buildRuntimeAppendix()
+    expect(a).toContain('## 事实分级')
+    expect(a).toContain('确定')
+    expect(a).toContain('推测')
+    expect(a).toContain('检索')
+    expect(a).toContain('检索于')
+    expect(a).toContain('我不确定')
+    expect(a).toContain('只能来自工具返回')
+  })
+
+  it('P7-T5：对话模式（无工具）也拿到事实分级；但不额外增加顶层 section', () => {
+    const persona = { soul: '# 灵魂', style: '# 风格' }
+    const plain = buildSystemPrompt(persona, {})
+    expect(plain).toContain('事实分级')
+    expect(plain.split(PROMPT_SEPARATOR)).toHaveLength(3) // 段数不变（加在运行时附录内部）
+  })
+
   it('技能清单：有技能时附录列 name+description 并引导 skill_use；无则不提', () => {
     const withSkills = buildRuntimeAppendix({
       skills: [{ name: 'study-flashcard', description: '整理学习闪卡' }]

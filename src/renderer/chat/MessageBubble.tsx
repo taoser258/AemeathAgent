@@ -380,7 +380,11 @@ function MessageBubble({
 }
 
 /** 产出文件卡片（同款口径）：回复末尾列出本轮写出的文件，点击 → 右侧栏预览。
- * 后缀决定角标文字（TS/JS/MD/JSON…），与成熟实现观感一致。 */
+ * 后缀决定角标文字（TS/JS/MD/JSON…），与成熟实现观感一致。
+ * 折叠：一轮产出文件很多时（批量写笔记等）默认只露前 4 张，其余点「展开」才看——
+ * 20 张卡堆在气泡里把对话区整个刷屏（owner 反馈）。 */
+const FILE_CARDS_PREVIEW = 4
+
 function fileBadgeText(name: string): string {
   const ext = name.slice(name.lastIndexOf('.') + 1).toUpperCase()
   if (ext === '') return 'FILE'
@@ -395,10 +399,13 @@ function FileCards({
   files: Array<{ rel: string; name: string; action: string }>
   onOpen: (rel: string, name: string) => void
 }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
   const badgeOf = (n: string): string => fileBadgeText(n)
+  const collapsible = files.length > FILE_CARDS_PREVIEW
+  const shown = collapsible && !expanded ? files.slice(0, FILE_CARDS_PREVIEW) : files
   return (
     <div className="msg-file-cards">
-      {files.map((f) => (
+      {shown.map((f) => (
         <button
           key={f.rel}
           type="button"
@@ -417,6 +424,15 @@ function FileCards({
           <span className="msg-file-open">↗</span>
         </button>
       ))}
+      {collapsible && (
+        <button
+          type="button"
+          className="msg-file-cards-more"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? '收起' : `展开其余 ${files.length - FILE_CARDS_PREVIEW} 个文件`}
+        </button>
+      )}
     </div>
   )
 }

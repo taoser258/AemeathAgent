@@ -60,6 +60,22 @@ export const MODEL_PRESETS: ModelPreset[] = [
     multimodal: true
   },
   {
+    id: 'p-mimo',
+    name: 'MiMo 小米',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    legacyModel: '',
+    context: 1048576,
+    multimodal: false
+  },
+  {
+    id: 'p-minimax',
+    name: 'MiniMax',
+    baseUrl: 'https://api.minimax.cn/v1',
+    legacyModel: '',
+    context: 1048576,
+    multimodal: true
+  },
+  {
     id: 'p-claude',
     name: 'Claude（Anthropic 官方）',
     baseUrl: 'https://api.anthropic.com',
@@ -74,7 +90,9 @@ export const MODEL_PRESETS: ModelPreset[] = [
     baseUrl: 'https://generativelanguage.googleapis.com',
     legacyModel: '',
     context: 1048576,
-    multimodal: true,
+    // 默认不开多模态：预置档案模型名为空、key 也没配，开着只会让它出现在「视觉档案」
+    // 候选里干扰选择（owner 拍板）。真要用 Gemini 看图，编辑档案勾上即可。
+    multimodal: false,
     protocol: 'gemini'
   }
 ]

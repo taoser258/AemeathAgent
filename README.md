@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/license-PolyForm--Noncommercial-yellow" alt="License">
   <img src="https://img.shields.io/badge/MCP-client-orange" alt="MCP">
-  <img src="https://img.shields.io/badge/tests-695%20passing-brightgreen" alt="测试">
+  <img src="https://img.shields.io/badge/tests-863%20passing-brightgreen" alt="测试">
 </p>
 
 以《鸣潮》角色 **爱弥斯** 为主题的 Windows 桌面 AI 伴侣：一个常驻桌宠小窗（透明 / 置顶 / 可拖拽）+ 一个主窗（聊天 / 工作 / 学习）。核心是一套自研的 agent 引擎——工具调用、权限审批、可恢复执行、记忆与检索、学习闭环，桌宠是它的"脸"，聊天只是最初的能力。
@@ -57,7 +57,7 @@ npm run dist          # 打 NSIS 安装包（产物目录见 package.json build.
 ### 对话与桌宠
 
 - **桌宠窗**：透明 / 置顶 / 拖拽 / 点击穿透可切 / 位置记忆 / 尺寸滑动调节（50%–150%）/ 右键菜单。
-- **聊天**：流式输出可中断；Markdown + 代码高亮 + 数学公式；图片、文本、**Word / Excel / PPT 附件开箱可读**（零依赖抽取正文，发给她即读）；表情包面板。
+- **聊天**：流式输出可中断；Markdown + 代码高亮 + 数学公式；图片、文本、Word / Excel / PPT 附件、**PDF 直读正文（可按页读取，扫描件会如实提示）**；表情包面板。
 - **三种模式**：💬 对话 / 🧰 工作 / 📚 学习，会话各自独立、侧栏按模式过滤；自动标题、置顶、重命名、重启完整恢复。
 - **实时监测条**：轮数 · 步数 · 工具耗时 · LLM 耗时 · 首 token 延迟 · tok/s · 缓存命中 · 输入/输出 token。
 
@@ -70,10 +70,13 @@ npm run dist          # 打 NSIS 安装包（产物目录见 package.json build.
 - **结构化提问**：拿不准先弹选项卡问你，不瞎猜。
 - **MCP 插座**：stdio 协议接入外部工具 server，按其自报 `readOnlyHint` 分级。
 - **多厂商协议**：OpenAI 兼容 / Anthropic / Gemini 三协议，流式 + 工具调用 + 缓存遥测。
+- **思考强度**：档案可声明支持的档位（低/中/高/超高/极致），聊天区右键模型拖动调节，三协议自动映射与钳制。
+- **上下文压缩**：长会话按真实 token 用量自动把更早对话压成 handoff 摘要（只压发送视图，原文不删），也可在用量浮层手动压；摘要失败会明确告知原因。
+- **识图两条腿**：非多模态模型可由「视觉档案」云端转述图片；另有 Windows 本地 OCR 逐字认字，转述内容明确标注、不冒充亲眼所见。
 
 ### 检索、记忆与富交互
 
-- **按模式工具可见性**：设置 → 工具，分组勾选内置工具（28 个）。
+- **按模式工具可见性**：设置 → 工具，分组勾选内置工具（33 个）。
 - **Skill 系统**：`skills/<name>/SKILL.md` 目录即技能（零代码接入），模型按需 `skill_use` 加载；内置 + 用户自装双来源。
 - **长期记忆**：跨会话记忆（自动沉淀 + 显式写入），隐私开关默认关。
 - **检索**：全文搜索 / 历史会话搜索 / 工作区文件树 + 侧栏内嵌浏览器。

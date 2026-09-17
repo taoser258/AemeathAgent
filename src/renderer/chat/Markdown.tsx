@@ -11,6 +11,7 @@ import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { GenuiBlock } from './genui/GenuiView'
+import { useChatStore } from './store'
 
 /** 从 React 子树里抠出纯文本（供复制按钮用，不参与渲染） */
 function extractText(node: ReactNode): string {
@@ -67,6 +68,27 @@ function CodeBlock({
   )
 }
 
+/**
+ * 链接：统一拦截到右侧栏内置浏览器打开。
+ * 不拦截就会在 Electron 当前窗口直接跳转、覆盖整个应用且退不回来（实测事故）。
+ * 中键/Ctrl 点击也拦下（默认行为同样是窗口导航）；要系统浏览器可在侧栏里点 ↗。
+ */
+function ExtLink(props: { href?: string; children?: ReactNode }): React.JSX.Element {
+  const openRightLink = useChatStore((s) => s.openRightLink)
+  const href = props.href ?? ''
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault()
+        if (href !== '') openRightLink(href)
+      }}
+    >
+      {props.children}
+    </a>
+  )
+}
+
 /** streaming：本轮消息是否仍在流式生成（genui 围栏半截 JSON 时据此显示占位而非报错降级） */
 function Markdown({
   content,
@@ -83,7 +105,7 @@ function Markdown({
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeHighlight, rehypeKatex]}
-        components={{ pre: Pre }}
+        components={{ pre: Pre, a: ExtLink }}
       >
         {content}
       </ReactMarkdown>

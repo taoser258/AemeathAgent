@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   buildMemoryAppendix,
   mergeInto,
+  MEMORY_CONTENT_MAX,
   MEMORY_MERGE_THRESHOLD,
   MEMORY_MAX_ENTRIES,
   pickForInjection,
@@ -13,14 +14,15 @@ import {
   tokenize,
   type MemoryEntry
 } from '../src/shared/memory'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { searchWorkspaceContent } from '../src/main/search/content-search'
 import {
   addEntry,
   clearAll,
   deleteEntry,
   readEntries,
-  setMemoryBase
+  setMemoryBase,
+  updateEntry
 } from '../src/main/memory/memory-store'
 
 function entry(partial: Partial<MemoryEntry> & { id: string }): MemoryEntry {
@@ -76,6 +78,22 @@ describe('scoreEntries / pickForInjection（检索打分）', () => {
 
   it('空查询 → 空结果（不注入）', () => {
     expect(scoreEntries(entries, '的')).toEqual([])
+  })
+
+  it('★ P7-T3：正文命中也算分（手动改过内容后能搜到），但权重低于关键词', () => {
+    // keywords 与查询无关，正文里有「玄武湖」
+    const onlyBody = entry({
+      id: 'body',
+      content: '用户每周六去玄武湖跑步',
+      keywords: ['运动', '周末']
+    })
+    const hits = scoreEntries([onlyBody], '玄武湖')
+    expect(hits).toHaveLength(1)
+    expect(hits[0].entry.id).toBe('body')
+    // 关键词命中（2 分/词）应排在仅正文命中（1 分/词）之前
+    const kw = entry({ id: 'kw', content: '无关正文', keywords: ['玄武湖'] })
+    const ranked = scoreEntries([onlyBody, kw], '玄武湖')
+    expect(ranked[0].entry.id).toBe('kw')
   })
 })
 
@@ -189,6 +207,50 @@ describe('memory-store（IO：整写 + 快照）', () => {
     clearAll()
     expect(readEntries()).toHaveLength(0)
     expect(readdirSync(join(dir, 'backups')).length).toBe(1)
+  })
+
+  it('updateEntry：改正文 + 刷 updatedAt，其余字段保留（kind/keywords/hits/createdAt）', () => {
+    addEntry({ kind: 'fact', content: '旧内容', keywords: ['旧词'] }, 's1')
+    const before = readEntries()[0]
+    const updated = updateEntry(before.id, '  新内容：在玄武湖畔读书  ')
+    expect(updated).not.toBeNull()
+    const after = readEntries()[0]
+    expect(after.content).toBe('新内容：在玄武湖畔读书') // trim
+    expect(after.kind).toBe('fact')
+    expect(after.keywords).toEqual(['旧词'])
+    expect(after.createdAt).toBe(before.createdAt)
+    expect(after.updatedAt).toBeGreaterThanOrEqual(before.updatedAt)
+  })
+
+  it('updateEntry：先快照，误改可从 backups 找回', () => {
+    addEntry({ kind: 'fact', content: '重要原文', keywords: ['原文'] }, 's')
+    const id = readEntries()[0].id
+    updateEntry(id, '被改错的内容')
+    expect(readEntries()[0].content).toBe('被改错的内容')
+    const backups = readdirSync(join(dir, 'backups')).filter((f) => f.endsWith('.json'))
+    expect(backups.length).toBe(1)
+    const snap = JSON.parse(readFileSync(join(dir, 'backups', backups[0]), 'utf8')) as MemoryEntry[]
+    expect(snap[0].content).toBe('重要原文')
+  })
+
+  it('updateEntry：空内容拒绝（不改盘、不留快照）；id 不存在返回 null；超长截断 120', () => {
+    addEntry({ kind: 'fact', content: 'x', keywords: ['x'] }, 's')
+    const id = readEntries()[0].id
+    expect(updateEntry(id, '   ')).toBeNull()
+    expect(readEntries()[0].content).toBe('x')
+    expect(updateEntry('不存在的id', 'y')).toBeNull()
+    const long = '字'.repeat(MEMORY_CONTENT_MAX + 50)
+    const ok = updateEntry(id, long)
+    expect(ok?.content).toHaveLength(MEMORY_CONTENT_MAX)
+  })
+
+  it('★ 验收链：编辑后 memory_search 口径（scoreEntries）能命中新正文', () => {
+    addEntry({ kind: 'fact', content: '旧住址', keywords: ['旧词'] }, 's')
+    const id = readEntries()[0].id
+    updateEntry(id, '用户搬到了南京市建邺区')
+    const hits = scoreEntries(readEntries(), '建邺区住哪')
+    expect(hits).toHaveLength(1)
+    expect(hits[0].entry.content).toContain('建邺区')
   })
 })
 

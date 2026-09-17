@@ -1,4 +1,4 @@
-// Gemini 原生协议适配：openai 形态的 ChatTurn[]/LlmTool ↔ Gemini
+﻿// Gemini 原生协议适配：openai 形态的 ChatTurn[]/LlmTool ↔ Gemini
 // generateContent 的 contents/tools 双向转换 + 原生 fetch SSE 流式解析。
 // 照 anthropic.ts 同款范式：纯转换函数与 SSE 聚合器全部导出，
 // vitest 直接单测（不依赖网络）；零新增依赖（fetch + 手写 SSE 行解析）。
@@ -18,6 +18,7 @@ import type {
   StreamChatResult,
   ToolCallDraft
 } from './client'
+import { planReasoning } from '@shared/reasoning'
 import type { TokenUsage } from '@shared/types'
 
 /** Gemini temperature 合法范围 0~2（闭区间，与 openai 兼容层的开区间坑不同） */
@@ -175,30 +176,33 @@ export function toGeminiTools(tools: LlmTool[]): GeminiTool[] {
 export function buildGeminiBody(
   request: Pick<
     StreamChatRequest,
-    'model' | 'temperature' | 'messages' | 'tools' | 'reasoningEffort'
+    'model' | 'temperature' | 'messages' | 'tools' | 'reasoningEffort' | 'maxOutput'
   >
 ): GeminiRequest {
   const systemTurn = request.messages.find((t) => t.role === 'system')
   const rest = request.messages.filter((t) => t.role !== 'system')
+  // 思考强度与输出上限（P8-T4）：档位 → thinkingBudget 的换算在 reasoning.ts
+  // （表驱动 + 钳制：xhigh/max 是新一代档位，官方区间上限按保守值取）
+  const reasoning = planReasoning({
+    protocol: 'gemini',
+    ...(request.reasoningEffort !== undefined ? { effort: request.reasoningEffort } : {}),
+    ...(request.maxOutput !== undefined ? { maxOutput: request.maxOutput } : {})
+  })
   const body: GeminiRequest = {
     contents: toGeminiContents(rest),
     generationConfig: {
       temperature: Math.min(Math.max(request.temperature, 0), GEMINI_MAX_TEMPERATURE),
-      // 思考强度：2.5 系 thinkingBudget（flash 全程 0~24576；pro 最低 128——
-      // 档位映射 low 1024 / medium 8192 / high 24576，default 不注入跟随模型默认）
-      ...(request.reasoningEffort !== undefined && request.reasoningEffort !== 'default'
-        ? {
-            thinkingConfig: {
-              thinkingBudget: { low: 1024, medium: 8192, high: 24576 }[
-                request.reasoningEffort as 'low' | 'medium' | 'high'
-              ]
-            }
-          }
-        : {})
+      // 思考强度：2.5 系 thinkingBudget（default 不注入，跟随模型默认）
+      ...(reasoning.enabled && reasoning.budget !== undefined
+        ? { thinkingConfig: { thinkingBudget: reasoning.budget } }
+        : {}),
+      // 输出上限：**只有档案里显式设置才带**（默认仍然刻意不带——见下方注释）
+      ...(reasoning.maxTokens !== undefined ? { maxOutputTokens: reasoning.maxTokens } : {})
     }
   }
-  // 刻意不带 maxOutputTokens：Gemini 2.5 系的思考 token 计入 maxOutputTokens，
+  // 刻意不**默认**带 maxOutputTokens：Gemini 2.5 系的思考 token 计入 maxOutputTokens，
   // 设小了会出现「空回复 + finishReason=MAX_TOKENS」，交给模型默认值反而稳。
+  // （P8-T4：用户在档案里显式填了「输出上限」时才带——那是他自己的取舍）
   if (
     systemTurn !== undefined &&
     typeof systemTurn.content === 'string' &&

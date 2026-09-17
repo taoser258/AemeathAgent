@@ -52,6 +52,12 @@ export function registerUpdaterIpc(): void {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.disableWebInstaller = true // Windows NSIS：用原生安装器而非自带 web 安装
+  // 对齐发布库 taoser258/AemeathAgent 的 release（只挂 latest.yml + setup.exe）：
+  // ① 当前版本带 -alpha 预发布后缀时，electron-updater 默认按预发布名找渠道文件
+  //   （alpha.yml），发布库上没有 → 永远 404。显式锁回 latest.yml。
+  // ② latest.yml 里的候选版本同样是预发布版，默认会被过滤掉，allowPrerelease 放行。
+  autoUpdater.channel = 'latest'
+  autoUpdater.allowPrerelease = true
 
   autoUpdater.on('error', (err) => {
     // 静默降级：状态记给关于页，不弹窗（启动自动检查失败也走这里）

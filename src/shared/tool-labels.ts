@@ -13,11 +13,14 @@
 /** 内置工具的中文短名（与 registry.ts 的 ToolDef.name 一一对应，新增工具记得补） */
 export const TOOL_LABELS: Record<string, string> = {
   current_time: '查时间',
+  calculate: '算数',
   read_file: '读文件',
   list_dir: '看目录',
   write_file: '写文件',
   edit_file: '改文件',
   mkdir: '建文件夹',
+  mark_temp_files: '登记中间产物',
+  delete_file: '删文件',
   undo_last_change: '撤销改动',
   todo_write: '更新任务清单',
   note_write: '记笔记',
@@ -25,6 +28,8 @@ export const TOOL_LABELS: Record<string, string> = {
   study_progress_write: '记学习进度',
   study_progress_read: '看学习进度',
   active_window: '看当前窗口',
+  describe_image: '识图',
+  ocr_image: '本机识字',
   skill_use: '用技能',
   search_files: '按文件名找',
   search_content: '搜文件内容',
@@ -135,6 +140,8 @@ export function keyArgOf(name: string, argsPreview: string): string {
     case 'run_js':
       // 代码常为多行：压掉换行再截断（活动行是一行式 UI，brief 本身不处理换行）
       return brief((flat.code ?? '').replace(/\s+/g, ' ').trim(), 60)
+    case 'calculate':
+      return brief(flat.expression ?? '', 60)
     case 'export_pdf':
       return brief(flat.path ?? '', 60)
     case 'read_file':
@@ -142,6 +149,7 @@ export function keyArgOf(name: string, argsPreview: string): string {
     case 'edit_file':
     case 'list_dir':
     case 'mkdir':
+    case 'delete_file':
     case 'download_file':
       return brief(flat.path ?? '', 60)
     case 'search_files':
@@ -176,6 +184,10 @@ export function summarizeToolCall(name: string, argsPreview: string): string {
   switch (name) {
     case 'current_time':
       return '看看现在几点'
+    case 'calculate':
+      return flat.expression === undefined || flat.expression === ''
+        ? '算一个数'
+        : `算「${brief(flat.expression, 60)}」`
     case 'read_file':
       return path === '' ? '读取文件内容' : `读取「${path}」的内容`
     case 'list_dir':
@@ -189,6 +201,12 @@ export function summarizeToolCall(name: string, argsPreview: string): string {
     }
     case 'mkdir':
       return path === '' ? '新建一个文件夹' : `新建文件夹「${path}」`
+    case 'mark_temp_files': {
+      const n = json !== null && Array.isArray(json.paths) ? json.paths.length : 0
+      return n > 0 ? `登记 ${n} 个中间产物待清理` : '登记自己产生的中间产物'
+    }
+    case 'delete_file':
+      return path === '' ? '删除一个文件' : `把「${brief(path, 60)}」移入回收站`
     case 'undo_last_change':
       return '撤销上一次文件改动'
     case 'todo_write':
@@ -203,6 +221,12 @@ export function summarizeToolCall(name: string, argsPreview: string): string {
       return '看看学到哪了'
     case 'active_window':
       return '看看你当前开着的窗口'
+    case 'describe_image':
+      return flat.path === undefined || flat.path === '' ? '看图' : `看图：${brief(flat.path, 50)}`
+    case 'ocr_image':
+      return flat.path === undefined || flat.path === ''
+        ? '本机识字'
+        : `本机识字：${brief(flat.path, 50)}`
     case 'skill_use':
       return flat.name === undefined || flat.name === ''
         ? '使用一个技能'

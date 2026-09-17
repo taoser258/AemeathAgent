@@ -155,6 +155,7 @@
 /* 多行自述：默认 height 由 rows 决定，但允许用户自己往下拉 */
 .settings-textarea {
   width: 100%;
+  box-sizing: border-box;
   min-height: 110px;
   resize: vertical;
   line-height: 1.6;
@@ -721,6 +722,64 @@
   padding: 0;
   margin-bottom: 30px;
   border-radius: 0;
+}
+
+/* ── P8-T4：思考档位宫格 + 预设按钮行（图一）──
+   颜色/圆角一律走 CSS 变量（深浅两套自动生效），不写死色值 */
+.level-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+
+.level-chip {
+  appearance: none;
+  border: 1px solid var(--pill-border);
+  border-radius: 8px;
+  background: var(--control-bg);
+  color: var(--text-strong, #333);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.level-chip:hover {
+  border-color: var(--accent);
+}
+
+.level-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+
+.preset-chip {
+  appearance: none;
+  border: 1px dashed var(--pill-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.preset-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .settings-card-head {

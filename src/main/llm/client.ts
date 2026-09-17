@@ -10,7 +10,10 @@ import type {
   ChatCompletionCreateParamsStreaming
 } from 'openai/resources/chat/completions'
 import { classifyLlmError } from './errors'
-import type { TokenUsage, ReasoningEffort } from '@shared/types'
+import { planReasoning } from '@shared/reasoning'
+import { resolveReasoningAdapter } from '@shared/reasoning-adapters'
+import { estimateTokens } from '@shared/token-estimate'
+import type { TokenUsage, ReasoningEffort, ReasoningAdapterId } from '@shared/types'
 
 /** 多模态 content part（OpenAI 兼容视觉格式）；纯文本消息继续用 string */
 export type ChatContentPart =
@@ -65,6 +68,13 @@ export interface StreamChatRequest {
   protocol?: 'openai' | 'anthropic' | 'gemini'
   /** 思考强度：default/缺省不注入；openai 协议映射 reasoning_effort */
   reasoningEffort?: ReasoningEffort
+  /** 输出上限（tokens）：缺省不发送，交给各协议默认（P8-T4 起由档案的 maxOutput 提供） */
+  maxOutput?: number
+  /**
+   * openai 兼容系厂商风格（P9-T1）：调用方按档案 baseUrl/手动覆盖解析好再传；
+   * 缺省 = 通用 OpenAI 钳制。anthropic/gemini 协议忽略此字段。
+   */
+  reasoningAdapter?: ReasoningAdapterId
 }
 
 export interface StreamChatHandlers {
@@ -73,6 +83,11 @@ export interface StreamChatHandlers {
   onDelta: (chunk: string) => void
   /** 收到一个思考增量（模型主动输出的推理内容；供应商没给就不触发——我们不主动开启，P4 过程时间线 v1） */
   onThinking?: (chunk: string) => void
+  /**
+   * 收到工具调用的 name/arguments 片段（P9 修 tok/s）：这些也是 completion_tokens
+   * 的一部分，透出给上层做实时 token 估算，避免纯工具轮实时速率失真。
+   */
+  onToolDelta?: (chunk: string) => void
 }
 
 export interface StreamChatResult {
@@ -128,15 +143,39 @@ export async function streamChat(
   // （开区间，报 400 "Temperature should be in [0.0, 2.0]"）——发送前钳到 1.99 兜底。
   const temperature = Math.min(Math.max(request.temperature, 0), 1.99)
 
+  // 思考强度与输出上限（P8-T4 + P9-T1）：
+  // 厂商风格按档案 baseUrl 自动识别（或用档案的手动覆盖），档位映射统一走 reasoning.ts
+  // （表驱动 + 折算不报错；各厂商实际发送的字段/枚举见 reasoning-adapters.ts）。
+  const adapter = request.reasoningAdapter ?? resolveReasoningAdapter({ baseUrl: request.baseUrl })
+  const reasoning = planReasoning({
+    protocol: 'openai',
+    adapter,
+    model: request.model,
+    ...(request.reasoningEffort !== undefined ? { effort: request.reasoningEffort } : {}),
+    ...(request.maxOutput !== undefined ? { maxOutput: request.maxOutput } : {})
+  })
+
+  // 厂商扩展字段（thinking 开关）不在 openai-node 类型里——随对象透传，
+  // 官方兼容端点（智谱/方舟/MiMo/MiniMax 等）均原样接收该非标顶层字段；
+  // createOnce 发请求前统一 cast 回 SDK 类型。
   const base = {
     model: request.model,
     temperature,
     messages: request.messages,
     ...(request.tools && request.tools.length > 0 ? { tools: request.tools } : {}),
-    // 思考强度：OpenAI 兼容语义 reasoning_effort（o 系/兼容网关广泛支持；不支持的服务端会忽略）
-    ...(request.reasoningEffort !== undefined && request.reasoningEffort !== 'default'
-      ? { reasoning_effort: request.reasoningEffort }
+    // reasoning_effort：厂商适配器给了实际枚举就用它（开关型厂商为 undefined → 不发）；
+    // 通用 OpenAI 回退到钳制后的 level（low/medium/high）。
+    ...(reasoning.enabled
+      ? reasoning.effort !== undefined
+        ? { reasoning_effort: reasoning.effort }
+        : reasoning.thinking === undefined && reasoning.level !== 'default'
+          ? { reasoning_effort: reasoning.level }
+          : {}
       : {}),
+    // 厂商思考开关：thinking:{type:'enabled'|'adaptive'}
+    ...(reasoning.thinking ? { thinking: { type: reasoning.thinking.type } } : {}),
+    // 输出上限：只有档案里显式设置了才发（缺省保持"不发送、交给模型默认"的既有行为）
+    ...(reasoning.maxTokens !== undefined ? { max_tokens: reasoning.maxTokens } : {}),
     stream: true
   }
 
@@ -155,18 +194,21 @@ export async function streamChat(
   }
 
   async function createOnce(withUsage: boolean): Promise<Stream<ChatCompletionChunk>> {
-    const params: ChatCompletionCreateParamsStreaming = withUsage
-      ? {
-          ...base,
-          messages: base.messages as ChatCompletionCreateParamsStreaming['messages'],
-          stream_options: { include_usage: true },
-          stream: true
-        }
-      : {
-          ...base,
-          messages: base.messages as ChatCompletionCreateParamsStreaming['messages'],
-          stream: true
-        }
+    // 含厂商扩展（thinking）的请求体：展开合并后 cast 回 SDK 类型，非标字段随 body 透传
+    const params = (
+      withUsage
+        ? {
+            ...base,
+            messages: base.messages as ChatCompletionCreateParamsStreaming['messages'],
+            stream_options: { include_usage: true },
+            stream: true
+          }
+        : {
+            ...base,
+            messages: base.messages as ChatCompletionCreateParamsStreaming['messages'],
+            stream: true
+          }
+    ) as ChatCompletionCreateParamsStreaming
     return client.chat.completions.create(params, { signal: handlers.signal })
   }
 
@@ -179,9 +221,13 @@ export async function streamChat(
   let finishReason = ''
   let firstAt: number | null = null
   let lastAt: number | null = null
-  let deltaCount = 0
-  /** 思考增量数（仅在供应商未上报 usage 时用于近似 completionTokens；见下方口径说明） */
-  let reasoningDeltas = 0
+  /**
+   * 已生成输出的估算 token 数（正文 + 思考 + 工具参数）。
+   * 供应商未上报 usage 时用它近似 completionTokens；逐片按字符估算而非
+   * “一片算一个 token”——攒批发送的端点（百炼等）一条 delta 可含多个 token，
+   * 旧口径会让实时 tok/s 严重偏低、结束用真实 usage 又瞬间暴涨。
+   */
+  let estOutputTokens = 0
   for await (const chunk of stream) {
     if (chunk.usage) {
       usage = {
@@ -211,8 +257,16 @@ export async function streamChat(
     for (const dc of choice?.delta?.tool_calls ?? []) {
       const entry = pendingCalls.get(dc.index) ?? { id: '', name: '', args: [] }
       if (dc.id) entry.id = dc.id
-      if (dc.function?.name) entry.name += dc.function.name
-      if (dc.function?.arguments) entry.args.push(dc.function.arguments)
+      if (dc.function?.name) {
+        entry.name += dc.function.name
+        estOutputTokens += estimateTokens(dc.function.name)
+        handlers.onToolDelta?.(dc.function.name)
+      }
+      if (dc.function?.arguments) {
+        entry.args.push(dc.function.arguments)
+        estOutputTokens += estimateTokens(dc.function.arguments)
+        handlers.onToolDelta?.(dc.function.arguments)
+      }
       pendingCalls.set(dc.index, entry)
       if (dc.function?.name !== undefined || dc.function?.arguments !== undefined) toolDelta = true
     }
@@ -220,14 +274,13 @@ export async function streamChat(
       const now = performance.now()
       if (firstAt === null) firstAt = now
       lastAt = now
-      deltaCount += 1
     }
     const delta = choice?.delta?.content ?? ''
     if (delta !== '') {
       const now = performance.now()
       if (firstAt === null) firstAt = now // 空增量不算首 token
       lastAt = now
-      deltaCount += 1
+      estOutputTokens += estimateTokens(delta)
       accumulated += delta
       handlers.onDelta(delta)
     }
@@ -243,7 +296,7 @@ export async function streamChat(
       const now = performance.now()
       if (firstAt === null) firstAt = now
       lastAt = now
-      reasoningDeltas += 1
+      estOutputTokens += estimateTokens(reasoning)
       thinking += reasoning
       handlers.onThinking?.(reasoning)
     }
@@ -252,8 +305,8 @@ export async function streamChat(
   const totalMs = Math.round(end - t0)
   const genMs = firstAt !== null && lastAt !== null ? Math.round(lastAt - firstAt) : 0
   const ttftMs = firstAt !== null ? Math.round(firstAt - t0) : 0
-  // 供应商未上报 usage 时用增量数近似：正文 + 思考（与时长口径一致，避免一边含一边不含）
-  const completionTokens = usage?.completionTokens ?? deltaCount + reasoningDeltas
+  // 供应商未上报 usage 时用字符估算近似 completionTokens（正文+思考+工具参数）
+  const completionTokens = usage?.completionTokens ?? estOutputTokens
   const tokPerS = genMs > 0 ? Math.round((completionTokens / genMs) * 1000) : 0
   const toolCalls: ToolCallDraft[] = [...pendingCalls.entries()]
     .sort(([a], [b]) => a - b)

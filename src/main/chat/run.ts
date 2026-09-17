@@ -1,16 +1,17 @@
-// 聊天管线：chat:send → 组 system prompt → LLM 流式 → chat:stream 逐 token 推送。
+﻿// 聊天管线：chat:send → 组 system prompt → LLM 流式 → chat:stream 逐 token 推送。
 // 契约：渲染层 chatSend(sessionId, text, attachments)；主进程生成 runId；
 // 中断 chat:cancel(runId)；done/error 后该 runId 关闭。
 // 会话历史 T5 起持久化（main/sessions/session-store.ts，每会话一个 JSON 原子写）；
 // 本轮 user/assistant 消息在流结束（含中断/出错保留部分）时落盘，发送时从盘上重建上下文。
 
 import { BrowserWindow, dialog, ipcMain } from 'electron'
-import { statSync } from 'fs'
-import { join } from 'path'
+import { existsSync, statSync } from 'fs'
+import { basename, join } from 'path'
 import {
   CHAT_ANSWER,
   CHAT_APPROVE,
   CHAT_CANCEL,
+  CHAT_COMPACT,
   CHAT_SEND,
   CHAT_NUDGE,
   CHAT_STREAM,
@@ -39,6 +40,7 @@ import { RESUME_NUDGE_TEXT } from '@shared/types'
 import type { ChatMode } from '@shared/types'
 import { boundWorkspace, checkWorkspace } from '@shared/workspace'
 import type {
+  AppConfig,
   ChatAttachmentPayload,
   ChatSendResult,
   ModelProfile,
@@ -61,14 +63,22 @@ import {
 import { classifyLlmError } from '../llm/errors'
 import { buildSystemPrompt } from '../agent/prompt'
 import { loadPersona } from '../agent/persona'
-import { executeToolCall, getLlmTools, getToolPathBase } from '../agent/tools/registry'
+import {
+  executeToolCall,
+  getLlmTools,
+  getToolPathBase,
+  resolveToolPath
+} from '../agent/tools/registry'
+import { trashToRecycleBin } from '../agent/tools/trash'
+import { planTempCleanup } from '../agent/tools/temp-cleanup'
 import { getSubLlmTools, handleSpawnTool } from '../agent/spawn'
 import { handleAskTool } from './ask'
 import { writeAgentLog } from '../agent/agent-log'
 import { appendUsage } from '../usage/usage-log'
 import { resolveProducedFile } from './produced-file'
-import { fileRefFromCall, stripRunJsMarker } from '@shared/produced-file'
+import { fileRefFromCall, stripRunJsMarker, extractProducedPath } from '@shared/produced-file'
 import { pickForInjection } from '@shared/memory'
+import { estimateTokens } from '@shared/token-estimate'
 import {
   bumpHits as bumpMemoryHits,
   readEntries as readMemoryEntries
@@ -91,14 +101,32 @@ import {
 import { buildApprovalDetail } from '../agent/tools/diff'
 import { appendDebugLog } from '../log'
 import { runToolLoop } from './loop'
+import { CitationGuard } from './citation-guard'
 import { TodoNudges } from './todo-nudge'
 import { createToolGate, clearSessionAllowedTools } from './permission'
 import {
   attachmentNote,
+  imageVerificationNote,
   llmTurnsToPersisted,
   projectPersistedHistory,
-  trimHistoryForRequest
+  trimHistoryForRequest,
+  visionFailureNote,
+  visionTranscriptionNote
 } from './history'
+import { describeImage, pickVisionProfile, visionUnavailableHint } from '../llm/vision'
+import {
+  COMPACT_FALLBACK_NOTE,
+  buildCompactedView,
+  compactResultNotice,
+  estimateTurnTokens,
+  estimateViewTokens,
+  isContextOverflowError,
+  pickCompactCut,
+  resolveCompactPolicy,
+  shouldCompact
+} from './compact'
+import { summarizeTurns } from './compact-run'
+import { readCompactSummary, writeCompactSummary } from './compact-store'
 import {
   accumulateStats,
   appendSessionTurns,
@@ -266,6 +294,59 @@ function capMessagesByContext(messages: ChatTurn[], context: number): ChatTurn[]
     keptFromEnd.unshift(turn)
   }
   return [messages[0], ...keptFromEnd]
+}
+
+/**
+ * 视觉旁路（P8-T3）：当前档案收不了图时，请视觉档案把每张图转述成文字，注入本轮文本。
+ *
+ * 为什么**不切换主模型**（照 pi-image-fallback 的取舍）：切过去再切回来会打烂两边
+ * 的 prompt cache，还会让会话历史里出现"模型换了人"的错乱；一次独立小调用的成本
+ * 远低于此。选档与调用都在 llm/vision.ts（纯函数 + 单一 LLM 出口），这里只做胶水。
+ *
+ * 失败分两种，处理也不同：
+ * - **选不出视觉档案**（没配/关掉了/档案被删）→ 回退既有行为：如实说"看不到图"，附指路；
+ * - **调用失败**（网络/超时/端点拒绝）→ 注入一句"识图失败"占位，**不阻断本轮对话**
+ *   （否则一次烂网络就把用户的话吞了）。
+ */
+async function transcribeImages(
+  config: AppConfig,
+  activeProfile: ModelProfile,
+  attachments: readonly ChatAttachmentPayload[]
+): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
+  const images = attachments.filter((a) => a.kind === 'image' && a.dataUrl !== undefined)
+  const pick = pickVisionProfile({
+    profiles: config.model.profiles,
+    activeId: config.model.activeId,
+    visionProfileId: config.model.visionProfileId,
+    hasKey: (id) => {
+      const key = readProfileKey(configDir(), id)
+      return key !== null && key !== ''
+    }
+  })
+  if (!pick.ok) {
+    return {
+      ok: false,
+      error: `「${activeProfile.name}」未开启多模态，无法接收图片附件。${visionUnavailableHint(pick.reason)}`
+    }
+  }
+  const apiKey = readProfileKey(configDir(), pick.profile.id) ?? ''
+  const notes: string[] = []
+  for (const att of images) {
+    const res = await describeImage({
+      profile: pick.profile,
+      apiKey,
+      dataUrl: att.dataUrl ?? ''
+    })
+    notes.push(
+      res.ok
+        ? visionTranscriptionNote(att.name, pick.profile.name, res.text)
+        : visionFailureNote(att.name, res.error)
+    )
+  }
+  if (notes.length === 0) {
+    return { ok: false, error: `「${activeProfile.name}」未开启多模态，无法接收图片附件。` }
+  }
+  return { ok: true, note: notes.join('') }
 }
 
 /** 附件防御上限：数量 / 名字长度 / 文本内容 / 图片 dataUrl（≈6MB 二进制） */
@@ -437,17 +518,32 @@ export function registerChatIpc(): void {
       llmText = `（发来了 ${imageParts.length} 张图片）`
     }
 
-    // 图片附件要求档案开启多模态；未开启直接拒绝（错误会写进助手气泡）
-    if (imageParts.length > 0 && profile.multimodal !== true) {
-      return {
-        ok: false,
-        error: `「${profile.name}」未开启多模态，无法发送图片附件。可到 设置 → 模型 编辑该档案打开「多模态」，或改用支持视觉的模型。`
+    // ── 图片能不能"看见"（P8-T3 视觉旁路）────────────────────────────
+    // 档案开了多模态 → 直接把图发给主模型（维持既有行为 + P7-T4 的核对提示）；
+    // 没开 → 不切模型（切了会打烂两边 prompt cache、还断会话），而是让**视觉档案**
+    // 做一次独立的小调用，把转述当文字注入本轮。转述必须标来源（见 history.ts）。
+    if (imageParts.length > 0) {
+      if (profile.multimodal === true) {
+        llmText += imageVerificationNote(imageParts.length)
+      } else {
+        const transcribed = await transcribeImages(config, profile, attachments)
+        if (!transcribed.ok) return { ok: false, error: transcribed.error }
+        llmText += transcribed.note
+        imageParts.length = 0 // 收不了图：一张都不发，避免服务端因图片 part 报 400
       }
     }
 
     // T5：历史从持久化层重建
     const persisted = loadSessionMessages(sessionsDir(), sessionId)
     const baseStats: SessionStats | undefined = persisted.ok ? persisted.stats : undefined
+    /**
+     * 上次请求的真实用量（会话存档里留着的）。
+     * 用途：**本轮第一轮** loop 还没发过请求、拿不到 usage——没有它就只能数字符，
+     * 而字符口径系统性偏低（不含 system/工具清单/工具参数），实测 88.8% 的会话
+     * 估出来只有窗口的 1/3 → 该压的时候压不动。有它就按真实值判定。
+     */
+    const persistedUsage: TokenUsage | null =
+      persisted.ok && persisted.usage !== undefined ? persisted.usage : null
     const historyTurns: ChatTurn[] = persisted.ok ? projectPersistedHistory(persisted.messages) : []
     const userTurn: ChatTurn =
       imageParts.length > 0
@@ -504,6 +600,26 @@ export function registerChatIpc(): void {
     // 按档案的上下文窗口裁剪（粗估 1 token ≈ 1.6 字符，给 system 与回复留 40% 余量）
     const capped = capMessagesByContext(messages, profile.context)
 
+    // ── 上下文压缩（P8-T1）：先用上次会话留下的摘要 ─────────────────────
+    // 摘要是**上次压缩的产物**，跨 run 复用（否则长会话每发一句都要重做一次摘要）。
+    // 摘要在裁剪之后注入，保证它不会被裁掉；它描述的是"比窗口里还早"的内容，
+    // 与保住的历史可能有少量重叠——转述轮里已经写明"不是原话"，重叠无害。
+    const savedSummary = config.chat.autoCompact ? readCompactSummary(sessionId) : null
+    const firstView: ChatTurn[] =
+      savedSummary === null ? capped : buildCompactedView(capped, capped.slice(1), savedSummary)
+    /** 摘要文本（跨轮累积；本轮压缩出来的新摘要会覆盖它并落盘） */
+    let compactSummary: string | null = savedSummary
+    /** 溢出自救额度：整次 run 只给一次（防"压缩→还是超→再压缩"的死循环） */
+    let overflowRecovered = false
+    /** 压缩失败提示只给一次（否则每轮都失败会刷屏） */
+    let compactFailNotified = false
+    /**
+     * 自动压缩的「验收」待办：压缩发生在请求前，此时不知道压缩后真实占用，
+     * **不能当场报"省下多少 token"**（owner 实测：固定开销占大头时报了等于骗人）。
+     * 记下折叠条数与压缩后视图，等这一轮真实 usage 回来再给结论（见 call 包装）。
+     */
+    let compactAwait: { droppedCount: number; viewAfter: ChatTurn[] } | null = null
+
     // 用户消息先落盘（进入循环前）：崩溃不丢本轮输入；工具步边界再增量落盘
     persistTurns(sessionId, [
       {
@@ -525,7 +641,8 @@ export function registerChatIpc(): void {
       // 每次发起流式调用前重置，否则多轮任务里监测栏的首 token 永远停在第 1 轮、
       // tps 分母跨轮累积——结束瞬间数值跳变，"感觉不准"的第二个根因。
       let liveFirstAt: number | null = null
-      let liveDeltas = 0
+      /** 本轮已生成输出的估算 token（正文+思考+工具参数），实时 tps 分子 */
+      let liveOutputTokens = 0
       /** 本轮请求起点（每次 call 尝试重置）：ttft 相对它算，而不是整次 run 的 t0 */
       let liveReqAt = 0
       /** 已收尾轮次的 ttft 累计（逐轮结算进此值；当前轮另加）——修复实时快照里
@@ -565,7 +682,7 @@ export function registerChatIpc(): void {
         lastStatsAt = now
         const liveTps =
           liveFirstAt !== null && now > liveFirstAt
-            ? Math.round(liveDeltas / ((now - liveFirstAt) / 1000))
+            ? Math.round(liveOutputTokens / ((now - liveFirstAt) / 1000))
             : 0
         const snap: SessionStats = {
           rounds: (baseStats?.rounds ?? 0) + live.rounds,
@@ -659,7 +776,10 @@ export function registerChatIpc(): void {
             messages: msgs,
             tools: getSubLlmTools(chatMode),
             protocol: profile.protocol,
-            reasoningEffort: profile.reasoningEffort
+            reasoningEffort: profile.reasoningEffort,
+            ...(profile.reasoningAdapter !== undefined
+              ? { reasoningAdapter: profile.reasoningAdapter }
+              : {})
           },
           { signal: sig, onDelta: () => {} } // 分身不流式：过程折叠为事件，不进消息流
         )
@@ -677,13 +797,177 @@ export function registerChatIpc(): void {
        * 约束下沉到 harness。判定逻辑在 chat/todo-nudge.ts（纯逻辑、有单测覆盖）。
        */
       const todoNudges = new TodoNudges(() => readTodos(sessionId))
+      /**
+       * 引用护栏（P7-T1）：收尾回复里引用了"工具结果/对话里没出处的链接"→ 催一次。
+       * 判定在 chat/citation-guard.ts（纯逻辑、有单测）。种子 = 已落盘的**工具结果与
+       * 用户消息**里的链接（assistant 历史不扫——上轮编造的链接混进种子=错误洗白）。
+       */
+      const citationGuard = new CitationGuard()
+      if (persisted.ok) {
+        citationGuard.seedFrom(
+          persisted.messages
+            .filter((m) => m.role === 'tool' || m.role === 'user')
+            .map((m) => m.text)
+        )
+      }
+      /** 成功工具结果的**全文**喂给护栏（executeTool 三个出口统一走 .then） */
+      const collectCitations = <T extends { ok: boolean; result: string }>(r: T): T => {
+        if (r.ok) citationGuard.noteToolResult(true, r.result)
+        return r
+      }
+      /**
+       * 收尾催办聚合器（任务书：两路各一次额度、文案拼接，别互相挤占）。
+       * 引用护栏的额度在 CitationGuard 内部；清单这路的"只催一次"在循环侧原本靠
+       * finishReminded 布尔——现在额度下沉到这里按源管理（真催出去才消耗，
+       * 干净收尾不烧额度，与护栏同款口径）。判定逻辑全在两个纯模块，这里只是胶水。
+       */
+      let todoReminded = false
+      const finishReminder = (finalText: string): string | null => {
+        const parts: string[] = []
+        if (!todoReminded) {
+          const t = todoNudges.finishReminder()
+          if (t !== null) {
+            todoReminded = true
+            parts.push(t)
+          }
+        }
+        const c = citationGuard.finishReminder(finalText)
+        if (c !== null) parts.push(c)
+        return parts.length > 0 ? parts.join('\n') : null
+      }
+
+      /**
+       * 本次 run 中她自己创建文件的绝对路径轨迹（任务末临时清理用）。
+       * 只记 write_file（新建/覆盖）与 run_js 的产出：
+       * edit_file 多为改用户已有文件（哪怕名字像 .log 也不该被顺手清掉），
+       * export_pdf/note_export/download_file 是明确的产出/下载，都不记。
+       */
+      const createdFiles = new Set<string>()
+      /**
+       * 记录"本次新建"的文件。write_file 只在目标**此前不存在**时记入——
+       * 覆写用户已有的同名文件（比如更新一个 app.log）绝不能被当临时件清掉。
+       * 解析不出路径/基准缺失时按"已存在"处理（宁可漏记，不可错杀）。
+       */
+      const trackCreated = (
+        name: string,
+        argsJson: string,
+        jsFiles: string[],
+        preExisted: boolean
+      ): void => {
+        if (name === 'write_file') {
+          if (preExisted) return
+          const raw = extractProducedPath(argsJson)
+          if (raw !== null) {
+            try {
+              createdFiles.add(resolveToolPath(raw, sessionWorkspace))
+            } catch {
+              // 相对路径基准缺失等：不入轨迹（宁可漏清，不可乱猜）
+            }
+          }
+        } else if (name === 'run_js') {
+          for (const rel of jsFiles) {
+            try {
+              createdFiles.add(resolveToolPath(rel, sessionWorkspace))
+            } catch {
+              // 同上
+            }
+          }
+        }
+      }
+
+      /** write_file 执行前探测目标是否已存在（临时清理轨迹用；任何异常按已存在处理） */
+      const targetExistedBefore = (name: string, argsJson: string): boolean => {
+        if (name !== 'write_file') return false
+        const raw = extractProducedPath(argsJson)
+        if (raw === null) return true
+        try {
+          return existsSync(resolveToolPath(raw, sessionWorkspace))
+        } catch {
+          return true
+        }
+      }
+
+      /**
+       * 她通过 mark_temp_files 登记的中间产物（per-run 内存态）。
+       * **这是自动清理唯一的意图信号**——两次误删事故（目录名 temp 里的成果、
+       * 用户要求保留的 旧日志.log）都源于系统拿"猜测"当删除依据，现在改为"她明确登记"。
+       */
+      const declaredTempFiles = new Set<string>()
+
+      /**
+       * 压缩一次（P8-T1，唯一调摘要模型的地方）：判定 → 切点 → 摘要（增量合并）→ 拼视图。
+       * 返回 null = 没压（不满足条件 / 摘要失败）：调用方一律回退未压缩视图。
+       * `@param force` true = 溢出自救（已确认超限，必须缩小；摘要失败也要丢旧内容保命）。
+       */
+      const compactOnce = async (
+        view: ChatTurn[],
+        force: boolean,
+        actualTokens: number | null = null
+      ): Promise<ChatTurn[] | null> => {
+        if (!config.chat.autoCompact && !force) return null
+        // 保留区必须按**实际窗口**缩放：32K 窗口下 Pi 的 20K 保留区会把额度吃光
+        // → 旧逻辑永不压缩（owner 实测 89.4% 纹丝不动）。见 resolveCompactPolicy。
+        const policy = resolveCompactPolicy(profile.context)
+        // 切点必须与触发用**同一把尺子**（owner 第二轮实测：真实 29.1K / 字符口径只估 10.8K
+        // → 该压却"无可压"，静默不动）。溢出自救时真实值未知，但既然已经超限，
+        // 真实占用必定 ≥ 窗口，就用窗口当已知下限。
+        const cut = pickCompactCut(view, policy, actualTokens ?? (force ? profile.context : null))
+        if (cut === null) return null
+        const res = await summarizeTurns({
+          profile,
+          apiKey,
+          previous: compactSummary,
+          dropped: cut.dropped
+        })
+        if (!res.ok) {
+          appendDebugLog(logsDir(), `[chat] 会话 ${sessionId} 上下文摘要失败: ${res.error}`)
+          // 失败要**说出来**（每次 run 只提示一次）：静默回退会让"88% 却毫无反应"变成无解之谜
+          if (!compactFailNotified) {
+            compactFailNotified = true
+            emit(sender, {
+              sessionId,
+              runId,
+              type: 'run_notice',
+              data: {
+                kind: 'compact',
+                attempt: 0,
+                text: `上下文压缩失败（${res.error}）——本轮照常继续，原始记录未动`
+              } satisfies RunNoticeData
+            })
+          }
+          if (!force) return null
+          // 救急场景：摘要没成但请求确实超限——只能丢旧内容并留一句说明（否则这轮发不出去）
+          return buildCompactedView(view, cut.kept, COMPACT_FALLBACK_NOTE)
+        }
+        const summary = res.text
+        compactSummary = summary
+        writeCompactSummary(sessionId, summary)
+        const compactedView = buildCompactedView(view, cut.kept, summary)
+        // 压缩当下只报"做了什么"，**不报省了多少 token**：真实占用要等这次请求的
+        // usage 回来才知道，当场折算会把固定开销（人设+工具 schema）也算进"省下"，
+        // owner 实测 136 字符的会话被报成省下上万 token。结论气泡等 usage（call 包装）。
+        compactAwait = { droppedCount: cut.dropped.length, viewAfter: compactedView }
+        emit(sender, {
+          sessionId,
+          runId,
+          type: 'run_notice',
+          data: {
+            kind: 'compact',
+            attempt: 0,
+            text: `已把更早的 ${cut.dropped.length} 条对话压成摘要，这次请求起生效（原文不删，回看/搜索仍是原文）`
+          } satisfies RunNoticeData
+        })
+        return compactedView
+      }
 
       try {
         const loopResult = await runToolLoop(
-          capped,
+          firstView,
           {
             call: async (msgs, signal) => {
               live.rounds += 1 // 进入即计：轮次预算/监测栏即时反映（完成后的耗时随后累加）
+              // 本次调用实际要发的消息：正常 = 循环给的视图；溢出自救后会换成压缩后的视图
+              let active = msgs
               // 瞬时错误自动重试：网络抖动 / 限流 / 5xx 不再把整轮任务打断。
               // 只在「这次尝试一个字都还没吐出来」时重试——已经流到气泡里的文字收不回来，
               // 重试会让正文重复；那种情况宁可如实报错（用户点「继续任务」即可接着跑）。
@@ -691,7 +975,7 @@ export function registerChatIpc(): void {
                 let emitted = false
                 // 本轮/本次尝试的计时基准重置（重试=重新计时；与 loop 侧 ttftMsLast 口径一致）
                 liveFirstAt = null
-                liveDeltas = 0
+                liveOutputTokens = 0
                 liveReqAt = Date.now() // 本轮请求起点：ttft = 首增量 - 此值
                 try {
                   const res = await streamChat(
@@ -700,19 +984,25 @@ export function registerChatIpc(): void {
                       apiKey,
                       model: profile.model,
                       temperature: config.model.temperature,
-                      messages: msgs,
+                      messages: active,
                       tools: chatMode === 'chat' ? undefined : getLlmTools(chatMode),
                       protocol: profile.protocol,
-                      reasoningEffort: profile.reasoningEffort
+                      reasoningEffort: profile.reasoningEffort,
+                      ...(profile.reasoningAdapter !== undefined
+                        ? { reasoningAdapter: profile.reasoningAdapter }
+                        : {}),
+                      maxOutput: profile.maxOutput
                     },
                     {
                       signal,
                       onDelta: (chunk) => {
                         emitted = true
                         tail += chunk
-                        liveDeltas += 1
-                        if (liveFirstAt === null) liveFirstAt = Date.now()
-                        pushStats(liveFirstAt - liveReqAt, liveDeltas === 1)
+                        const isFirst = liveFirstAt === null
+                        const firstAt = liveFirstAt ?? Date.now()
+                        if (isFirst) liveFirstAt = firstAt
+                        liveOutputTokens += estimateTokens(chunk)
+                        pushStats(firstAt - liveReqAt, isFirst)
                         deltaT.push(chunk)
                       },
                       // 思考增量：实时推给渲染层折叠块；持久化只落最终回答。
@@ -721,10 +1011,21 @@ export function registerChatIpc(): void {
                       // 只反映正文段，思考期间会显示"还没开始"。
                       onThinking: (chunk) => {
                         emitted = true
-                        liveDeltas += 1
-                        if (liveFirstAt === null) liveFirstAt = Date.now()
-                        pushStats(liveFirstAt - liveReqAt, liveDeltas === 1)
+                        const isFirst = liveFirstAt === null
+                        const firstAt = liveFirstAt ?? Date.now()
+                        if (isFirst) liveFirstAt = firstAt
+                        liveOutputTokens += estimateTokens(chunk)
+                        pushStats(firstAt - liveReqAt, isFirst)
                         thinkingT.push(chunk)
+                      },
+                      // 工具参数也是 completion_tokens 的一部分：实时估算一并计入，
+                      // 否则纯工具轮 tps 偏低、结束用真实 usage 时跳变。
+                      onToolDelta: (chunk) => {
+                        const isFirst = liveFirstAt === null
+                        const firstAt = liveFirstAt ?? Date.now()
+                        if (isFirst) liveFirstAt = firstAt
+                        liveOutputTokens += estimateTokens(chunk)
+                        pushStats(firstAt - liveReqAt, isFirst)
                       }
                     }
                   )
@@ -737,16 +1038,64 @@ export function registerChatIpc(): void {
                     live.cachedTok += res.cachedTokens
                     live.cacheKnown = true
                   }
+                  // 压缩验收（见 compactAwait）：真实 usage 到手后给最终结论。
+                  // 压完仍超窗口（owner 实测：136 字符会话也有 17.7K 固定占用）→
+                  // 明确解释"什么压不掉 + 怎么办"，不能让用户对着纹丝不动的用量环发懵。
+                  if (compactAwait !== null && res.usage !== undefined) {
+                    const awaited = compactAwait
+                    compactAwait = null
+                    const bodyTokens = awaited.viewAfter
+                      .slice(1)
+                      .reduce((n, t) => n + estimateTurnTokens(t), 0)
+                    const note = compactResultNotice({
+                      after: res.usage.promptTokens + res.usage.completionTokens,
+                      contextWindow: profile.context,
+                      bodyTokensAfter: bodyTokens,
+                      droppedCount: awaited.droppedCount
+                    })
+                    if (note !== null) {
+                      emit(sender, {
+                        sessionId,
+                        runId,
+                        type: 'run_notice',
+                        data: { kind: 'compact', attempt: 0, text: note } satisfies RunNoticeData
+                      })
+                    }
+                  } else if (compactAwait !== null) {
+                    // 供应商不报 usage：没法验收，清掉避免跨轮残留（中性气泡已说明压缩生效）
+                    compactAwait = null
+                  }
                   // 本轮 ttft 结算：先以"当前轮"值强推快照（liveTtftSum 尚不含它），
                   // 再把该轮 ttft 并入累计——下一轮起 pushStats 的 sum 才不丢中间轮。
                   const roundTtft = liveFirstAt !== null ? liveFirstAt - liveReqAt : 0
                   pushStats(roundTtft, true)
                   liveTtftSum += roundTtft
+                  // 用量环实时走：每轮真实 usage 到手即推（否则多轮任务中环停在上轮旧值，
+                  // 压缩在请求前发生时用户看到「百分比没到就压缩、答完才跳变」）。
+                  if (res.usage !== undefined) {
+                    emit(sender, { sessionId, runId, type: 'usage', data: res.usage })
+                  }
                   // 本轮流式结束：立即清缓冲（工具执行前 UI 先同步，思考块不再延迟 120ms）
                   thinkingT.flush()
                   deltaT.flush()
                   return res
                 } catch (err) {
+                  // P8-T1 溢出自救：上下文超限（厂商措辞各异，识别见 compact.ts）→
+                  // **立刻压缩一次再重试**（整次 run 只给一次，防"压了还超"的死循环）。
+                  // 放在重试判断之前：这类错误 kind 是 unknown，不特判就永远不会重试。
+                  if (
+                    !signal.aborted &&
+                    !emitted &&
+                    !overflowRecovered &&
+                    isContextOverflowError(err)
+                  ) {
+                    overflowRecovered = true
+                    const compacted = await compactOnce(active, true)
+                    if (compacted !== null) {
+                      active = compacted
+                      continue // 用压缩后的视图重试同一轮
+                    }
+                  }
                   const kind = classifyLlmError(err).kind
                   if (
                     signal.aborted ||
@@ -776,7 +1125,76 @@ export function registerChatIpc(): void {
               // 结构化提问：ask_user 需要"暂停-等作答-唤醒"运行时能力（registry
               // 静态 execute 不含），在包装层拦截。答案格式化成文本回灌给模型（同款于工具结果）。
               if (name === 'ask_user') {
-                return handleAskTool(argsJson, requestAsk)
+                return handleAskTool(argsJson, requestAsk).then(collectCitations)
+              }
+              // 登记中间产物：登记表是 per-run 内存态（registry 保持纯静态），
+              // 与 ask_user 同款在包装层拦截。只登记意图，不碰文件。
+              if (name === 'mark_temp_files') {
+                let list: unknown
+                try {
+                  list = (JSON.parse(argsJson) as { paths?: unknown }).paths
+                } catch {
+                  return Promise.resolve({
+                    ok: false,
+                    result: 'mark_temp_files 参数不是合法 JSON。'
+                  })
+                }
+                const paths = Array.isArray(list)
+                  ? list.filter((p): p is string => typeof p === 'string' && p.trim() !== '')
+                  : []
+                if (paths.length === 0) {
+                  return Promise.resolve({
+                    ok: false,
+                    result: 'mark_temp_files 需要 paths 数组（1-10 个要登记的中间产物路径）。'
+                  })
+                }
+                let added = 0
+                const names: string[] = []
+                for (const raw of paths.slice(0, 10)) {
+                  try {
+                    const abs = resolveToolPath(raw, sessionWorkspace)
+                    if (declaredTempFiles.has(abs)) continue
+                    declaredTempFiles.add(abs)
+                    added += 1
+                    names.push(basename(abs))
+                  } catch {
+                    // 路径解析不了：跳过（登记失败只是留着文件，不是损失）
+                  }
+                }
+                return Promise.resolve({
+                  ok: true,
+                  result:
+                    added > 0
+                      ? `已登记 ${added} 个中间产物（任务正常结束后移入回收站）：${names.join('、')}。`
+                      : '这些路径无法登记（可能格式不对），文件保持原样。'
+                })
+              }
+              // 删除文件：回收站调用用了 electron shell（registry 保持无 electron），
+              // 与 ask_user 同款在包装层拦截。审批已在 gate 里强制（每次必问，full 除外）。
+              if (name === 'delete_file') {
+                const raw = extractProducedPath(argsJson)
+                if (raw === null) {
+                  return Promise.resolve({
+                    ok: false,
+                    result: 'delete_file 缺少 path 参数（要删除的文件或文件夹路径）。'
+                  })
+                }
+                let abs: string
+                try {
+                  abs = resolveToolPath(raw, sessionWorkspace)
+                } catch (err) {
+                  return Promise.resolve({
+                    ok: false,
+                    result: `删除路径无效：${err instanceof Error ? err.message : String(err)}`
+                  })
+                }
+                return trashToRecycleBin(abs, sessionWorkspace).then((r) => {
+                  if (r.ok) {
+                    createdFiles.delete(r.path) // 已删，不必再进临时清理候选
+                    return { ok: true, result: `已移入回收站（可还原）：${r.path}` }
+                  }
+                  return { ok: false, result: r.error ?? '移入回收站失败' }
+                })
               }
               // 子任务分身：spawn_agent 的运行时需要 LLM 依赖（registry 的静态
               // execute 不含），在包装层拦截转 agent/spawn.ts；其余工具照旧统一入口。
@@ -805,40 +1223,51 @@ export function registerChatIpc(): void {
                       // 附带当前工具卡 id：渲染层把分身进度挂到 spawn_agent 那张卡上
                       data: { toolCallId: liveTcId, ...(data as Record<string, unknown>) }
                     })
-                }).then((r) => {
-                  appendDebugLog(logsDir(), `[chat] 子任务结束 → ${r.result.split('\n')[0] ?? ''}`)
-                  // 执行日志：完整消息序列落 userData/logs/agents/，
-                  // 滚 20 份——审计「分身到底干了什么」的原始记录；失败静默不影响结果
-                  if (r.log !== undefined) {
-                    writeAgentLog(join(logsDir(), 'agents'), `${runId}-${seq}`, {
-                      runId,
-                      seq,
-                      sessionId,
-                      ts: new Date().toISOString(),
-                      objective: r.log.objective,
-                      status: r.log.outcome.status,
-                      report: r.log.outcome.report,
-                      rounds: r.log.outcome.rounds,
-                      steps: r.log.outcome.steps,
-                      ms: r.log.outcome.ms,
-                      inputTok: r.log.outcome.inputTok,
-                      outputTok: r.log.outcome.outputTok,
-                      messages: r.log.outcome.messages
-                    })
-                  }
-                  return { ok: r.ok, result: r.result }
                 })
+                  .then((r) => {
+                    appendDebugLog(
+                      logsDir(),
+                      `[chat] 子任务结束 → ${r.result.split('\n')[0] ?? ''}`
+                    )
+                    // 执行日志：完整消息序列落 userData/logs/agents/，
+                    // 滚 20 份——审计「分身到底干了什么」的原始记录；失败静默不影响结果
+                    if (r.log !== undefined) {
+                      writeAgentLog(join(logsDir(), 'agents'), `${runId}-${seq}`, {
+                        runId,
+                        seq,
+                        sessionId,
+                        ts: new Date().toISOString(),
+                        objective: r.log.objective,
+                        status: r.log.outcome.status,
+                        report: r.log.outcome.report,
+                        rounds: r.log.outcome.rounds,
+                        steps: r.log.outcome.steps,
+                        ms: r.log.outcome.ms,
+                        inputTok: r.log.outcome.inputTok,
+                        outputTok: r.log.outcome.outputTok,
+                        messages: r.log.outcome.messages
+                      })
+                    }
+                    return { ok: r.ok, result: r.result }
+                  })
+                  .then(collectCitations)
               }
               const options = {
                 mode: chatMode,
                 workspace: sessionWorkspace,
                 out: {} as { diffStat?: { added: number; removed: number }; files?: string[] }
               }
-              return executeToolCall(name, argsJson, signal, sessionId, options).then((result) => {
-                lastDiffStat = options.out.diffStat ?? null
-                lastJsFiles = options.out.files ?? []
-                return result
-              })
+              // write_file 执行前看目标是否已存在（覆写已有文件不进临时清理轨迹）
+              const preExisted = targetExistedBefore(name, argsJson)
+              return executeToolCall(name, argsJson, signal, sessionId, options)
+                .then((result) => {
+                  lastDiffStat = options.out.diffStat ?? null
+                  lastJsFiles = options.out.files ?? []
+                  // 记录新建轨迹（任务末临时清理用；失败不记；覆写不记）
+                  if (result.ok) trackCreated(name, argsJson, options.out.files ?? [], preExisted)
+                  return result
+                })
+                .then(collectCitations)
             },
             onNotice: (notice) => {
               // 引擎侧状态（自动续跑/重试）→ 渲染层在流式气泡下显示一行淡色说明
@@ -855,6 +1284,23 @@ export function registerChatIpc(): void {
             },
             beforeRound: gate.beforeRound,
             beforeTool: gate.beforeTool,
+            // 上下文压缩（P8-T1）：每轮请求前按**真实 usage**判定是否该压；
+            // 压不动/压失败一律原样返回（绝不因压缩中断对话）
+            compactView: async (view, info) => {
+              const fromUsage =
+                info.lastUsage === undefined || info.lastUsage === null
+                  ? null
+                  : info.lastUsage.promptTokens + info.lastUsage.completionTokens
+              // 本轮**第一轮**拿不到 lastUsage（这个 run 还没发过请求）：退到会话存档里
+              // 上次请求的真实用量；再没有才用字符估算兜底（估算系统性偏低，只能当最后手段）
+              const used =
+                fromUsage ??
+                (persistedUsage !== null
+                  ? persistedUsage.promptTokens + persistedUsage.completionTokens
+                  : estimateViewTokens(view))
+              if (!shouldCompact({ usedTokens: used, contextWindow: profile.context })) return view
+              return (await compactOnce(view, false, used)) ?? view
+            },
             onToolStart: (tc) => {
               liveTcId = tc.id // 分身事件的关联锚点（先于 executeTool，串行保证）
               // 过程中文件行（同款口径）：读写类工具开始时就带文件引用，
@@ -920,9 +1366,9 @@ export function registerChatIpc(): void {
                 }
               }
             },
-            // 步末 / 收尾前的清单催办（文案与判定都在 chat/todo-nudge.ts）
+            // 步末清单催办（chat/todo-nudge.ts）；收尾催办 = 清单对账 + 引用护栏聚合
             stepReminder: () => todoNudges.stepReminder(),
-            finishReminder: () => todoNudges.finishReminder(),
+            finishReminder,
             // 插话消费（steering）：每轮 LLM 调用前把排队的用户消息注入上下文并落盘
             drainNudges: () => {
               const queue = nudgesBySession.get(sessionId)
@@ -1027,6 +1473,76 @@ export function registerChatIpc(): void {
             steps: loopResult.steps,
             updatedAt: Date.now()
           })
+        }
+        // 中间产物清理（owner 需求）：只在正常完成、有工具的模式下执行。
+        // ★ **删除依据只有"她的显式登记"**（mark_temp_files）——不再猜后缀、更不猜目录名：
+        //   两次误删事故（temp 目录里的成果 md、用户要求保留的 旧日志.log）都源于猜测。
+        //   planTempCleanup 再过 7 道闸门（登记/后缀/本轮新建/工作区内/用户没提过/数量/正常收尾），
+        //   删除走回收站——即使全错也能还原。任何意外静默，不影响任务结果。
+        if (loopResult.stoppedReason === 'completed' && chatMode !== 'chat') {
+          try {
+            const plan = planTempCleanup({
+              declared: [...declaredTempFiles],
+              created: [...createdFiles],
+              workspace: sessionWorkspace,
+              userText: llmText,
+              resolveDeclared: (raw) => {
+                try {
+                  return resolveToolPath(raw, sessionWorkspace)
+                } catch {
+                  return null
+                }
+              }
+            })
+            if (plan.skippedTooMany > 0) {
+              emit(sender, {
+                sessionId,
+                runId,
+                type: 'run_notice',
+                data: {
+                  kind: 'cleanup',
+                  attempt: 0,
+                  text: `任务结束：登记的中间产物有 ${plan.skippedTooMany} 个，数量偏多没敢自动清理（防误判），都原样保留；确认要清的话告诉我，我逐个删。`
+                } satisfies RunNoticeData
+              })
+            } else if (plan.files.length > 0 || plan.leftovers.length > 0) {
+              const cleaned: string[] = []
+              for (const p of plan.files) {
+                let isFile = false
+                try {
+                  isFile = statSync(p).isFile()
+                } catch {
+                  continue // 已不存在：跳过
+                }
+                if (!isFile) continue // 目录永不自动删
+                const r = await trashToRecycleBin(p, sessionWorkspace)
+                if (r.ok) cleaned.push(basename(p))
+              }
+              const parts: string[] = []
+              if (cleaned.length > 0) {
+                parts.push(
+                  `已把 ${cleaned.length} 个中间产物移入回收站（可还原）：${cleaned.join('、')}`
+                )
+              }
+              if (plan.leftovers.length > 0) {
+                parts.push(
+                  `${plan.leftovers.map((p) => basename(p)).join('、')} 未自动清理（你提到过或不像中间件），已原样保留`
+                )
+              }
+              emit(sender, {
+                sessionId,
+                runId,
+                type: 'run_notice',
+                data: {
+                  kind: 'cleanup',
+                  attempt: 0,
+                  text: `任务结束，${parts.join('；')}。`
+                } satisfies RunNoticeData
+              })
+            }
+          } catch {
+            // 清理是锦上添花：任何意外都静默，不打扰已完成的任务
+          }
         }
         const note =
           loopResult.stoppedReason === 'max-steps'
@@ -1150,6 +1666,70 @@ export function registerChatIpc(): void {
   }
 
   ipcMain.handle(CHAT_SEND, handleChatSend)
+
+  /**
+   * 手动压缩（P8-T1）：把该会话"保留窗口之外"的更早对话摘要成一段转述，落盘后
+   * **下次请求起生效**（正在跑的那轮不动——中途换视图会让工具配对错乱）。
+   * 不做流式推送，直接返回结果文案（一次性动作，UI 用气泡提示即可）。
+   */
+  ipcMain.handle(
+    CHAT_COMPACT,
+    async (_event, sessionId: unknown): Promise<{ ok: boolean; message: string }> => {
+      if (typeof sessionId !== 'string' || sessionId === '') {
+        return { ok: false, message: '会话标识不合法' }
+      }
+      if (activeBySession.has(sessionId)) {
+        return { ok: false, message: '她正在忙这轮任务——等这轮结束后再压缩上下文。' }
+      }
+      const config = readAppConfig(configDir())
+      const profile =
+        config.model.profiles.find((p) => p.id === config.model.activeId) ??
+        config.model.profiles[0]
+      if (profile === undefined || profile.model === '') {
+        return { ok: false, message: '当前模型档案还没填模型名，无法生成摘要。' }
+      }
+      const apiKey = readProfileKey(configDir(), profile.id)
+      if (apiKey === null || apiKey === '') {
+        return { ok: false, message: `「${profile.name}」还没有配置 API Key，无法生成摘要。` }
+      }
+      const persisted = loadSessionMessages(sessionsDir(), sessionId)
+      if (!persisted.ok) return { ok: false, message: '读不到这个会话的记录。' }
+      const view: ChatTurn[] = [
+        { role: 'system', content: '' },
+        ...trimHistoryForRequest(projectPersistedHistory(persisted.messages), HISTORY_LIMIT)
+      ]
+      const cut = pickCompactCut(
+        view,
+        resolveCompactPolicy(profile.context),
+        // 手动压缩同样要拿真实用量当尺子：否则"该压"的会话会被字符口径判定成无可压
+        persisted.usage === undefined
+          ? null
+          : persisted.usage.promptTokens + persisted.usage.completionTokens
+      )
+      if (cut === null) {
+        return {
+          ok: false,
+          message: '这个会话还没有可压缩的内容（更早的部分本来就在保留区内，还没到该压的时候）。'
+        }
+      }
+      const res = await summarizeTurns({
+        profile,
+        apiKey,
+        previous: readCompactSummary(sessionId),
+        dropped: cut.dropped
+      })
+      if (!res.ok) {
+        return { ok: false, message: `摘要生成失败：${res.error}` }
+      }
+      writeCompactSummary(sessionId, res.text)
+      // 不报"省下约 N token"：手动压缩发生在请求前，没有压缩后的真实 usage，
+      // 折算值在固定开销（人设+工具 schema）占大头时会严重虚高（实测同案）。
+      return {
+        ok: true,
+        message: `已压缩：更早的 ${cut.dropped.length} 条消息折叠成摘要，下次发言起生效；原始记录仍完整保存在会话里。实际占用看压缩后第一次回复的用量环即可。`
+      }
+    }
+  )
 
   // 工作中插话：任务运行中入队（渲染层本地已显示用户气泡）；无活跃 run 返回 false，
   // 渲染层据此回退为普通发送（避免消息石沉大海）

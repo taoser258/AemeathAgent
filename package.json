@@ -1,6 +1,6 @@
 {
   "name": "aemeath-agent",
-  "version": "0.3.1-alpha",
+  "version": "0.3.2-alpha",
   "description": "Aemeath Agent —— 以《鸣潮》爱弥斯为主题的 Windows 桌面 AI 伴侣 Agent",
   "main": "./out/main/index.js",
   "private": true,
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "format": "prettier --write .",
-    "lint": "eslint --cache .",
+    "lint": "eslint --cache src tests scripts",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -47,7 +47,8 @@
       "node_modules/@playwright/mcp/**",
       "node_modules/playwright/**",
       "node_modules/playwright-core/**",
-      "node_modules/node-pty/**"
+      "node_modules/node-pty/**",
+      "node_modules/unpdf/**"
     ],
     "win": {
       "icon": "build/icon.ico",
@@ -95,6 +96,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "unpdf": "^1.8.1",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

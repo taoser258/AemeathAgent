@@ -382,6 +382,8 @@ interface ChatState {
   workspaceRoot: string
   /** 右侧栏放大至整个主窗 */
   rightExpanded: boolean
+  /** 内置浏览器待打开的 URL（聊天外链写入，BrowserPanel 挂载时取走） */
+  browserPendingUrl: string | null
   setChatMode: (mode: ChatMode) => void
   /** 工作中插话（steering）：任务运行中把消息注入下一轮上下文并本地显示用户气泡。
    * 返回 false = 没有活跃任务（调用方回退普通发送）。 */
@@ -395,6 +397,10 @@ interface ChatState {
   /** 打开右侧栏并预览指定文件（文件树条目与聊天文件卡片共用入口）；
    * 已打开则激活，未打开则追加新标签（上限见 RIGHT_FILES_MAX） */
   openRightFile: (rel: string, name: string) => void
+  /** 聊天里点外链：在右侧栏内置浏览器打开（而不是让主窗跳走） */
+  openRightLink: (url: string) => void
+  /** 浏览器面板挂载时取走待打开的 URL（取一次即清，避免切 tab 重复导航） */
+  consumeBrowserPendingUrl: () => string | null
   /** 关闭一个文件标签；关的是激活项时自动切到相邻标签 */
   closeRightFile: (rel: string) => void
 
@@ -517,6 +523,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   chatMode: readStoredMode(),
   rightOpen: false,
   rightTab: readStoredRightTab(),
+  browserPendingUrl: null,
   rightExpanded: false,
   rightFiles: [],
   rightActiveRel: null,
@@ -651,6 +658,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // 关的是激活项 → 切到相邻（右邻优先，没有就左邻）；全关了清激活
     const nextActive = active === rel ? ((next[at] ?? next[at - 1])?.rel ?? null) : active
     set({ rightFiles: next, rightActiveRel: nextActive })
+  },
+
+  openRightLink: (url) => {
+    const t = url.trim()
+    // 只接 http(s)；其余 scheme（mailto:/文件链接）交系统处理
+    if (!/^https?:\/\//i.test(t)) {
+      void window.petAPI.openExternal(t)
+      return
+    }
+    get().setRightTab('browser')
+    set({ rightOpen: true, rightExpanded: false, browserPendingUrl: t })
+  },
+
+  consumeBrowserPendingUrl: () => {
+    const url = get().browserPendingUrl
+    if (url !== null) set({ browserPendingUrl: null })
+    return url
   },
 
   setChatMode: (mode) => {
@@ -1082,6 +1106,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (typeof ev.data === 'object' && ev.data !== null) {
           const snap = ev.data as SessionStats
           set((state) => ({ statsBySession: { ...state.statsBySession, [sessionId]: snap } }))
+        }
+      } else if (ev.type === 'usage') {
+        // 每轮真实 usage：用量环随轮次实时走（done 时会以最终值再覆盖一次，口径一致）
+        if (typeof ev.data === 'object' && ev.data !== null) {
+          const u = ev.data as TokenUsage
+          set((state) => ({ usageBySession: { ...state.usageBySession, [sessionId]: u } }))
         }
       } else if (ev.type === 'tool_call_start' && typeof ev.data === 'object' && ev.data !== null) {
         const d = ev.data as {

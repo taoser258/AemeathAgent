@@ -14,6 +14,13 @@ import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { DIALOG_PICK_DIRECTORY, DIALOG_PICK_FILES } from '@shared/ipc-channels'
 import type { ChatAttachmentPayload } from '@shared/types'
 import { extractOfficeText, isExtractableDoc } from './chat/doc-extract'
+import {
+  PDF_DEFAULT_PAGES,
+  formatPdfPages,
+  isPdfFile,
+  pageWindow,
+  readPdfPages
+} from './chat/pdf-extract'
 
 const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i
 const TEXT_RE =
@@ -111,6 +118,35 @@ export function registerFilePickIpc(): void {
         }
         attachments.push({ name, kind: 'text', size: info.size, path: filePath, text })
         if (text.includes('已截断')) warnings.push(`${name} 过长，只发送前 40K 字符`)
+      } else if (isPdfFile(name)) {
+        // PDF（P8-T2）：unpdf 抽文本层。抽到就内联正文（与 docx 同等待遇）；
+        // 抽不到（扫描件/加密/损坏）退化为文件名 + 路径占位，提示里说清下一步。
+        const buffer = await readFile(filePath).catch(() => null)
+        const pdf = buffer === null ? null : await readPdfPages(buffer)
+        if (pdf === null || !pdf.ok) {
+          warnings.push(
+            `${name} 正文未能解析（${pdf === null ? '读取失败' : pdf.error}），只发了文件名`
+          )
+          attachments.push({ name, kind: 'file', size: info.size, path: filePath })
+          continue
+        }
+        const { from, to } = pageWindow(pdf.totalPages, 1, PDF_DEFAULT_PAGES)
+        const formatted = formatPdfPages(pdf.pages, { from, to })
+        if (formatted.empty) {
+          warnings.push(`${name} 没有文本层（扫描件/图片型 PDF），只发了文件名`)
+          attachments.push({ name, kind: 'file', size: info.size, path: filePath })
+          continue
+        }
+        attachments.push({
+          name,
+          kind: 'text',
+          size: info.size,
+          path: filePath,
+          text: formatted.text
+        })
+        if (to < pdf.totalPages) {
+          warnings.push(`${name} 共 ${pdf.totalPages} 页，只发送了前 ${to} 页`)
+        }
       } else if (TEXT_RE.test(name)) {
         const full = await readFile(filePath, 'utf8').catch(() => null)
         if (full === null) {

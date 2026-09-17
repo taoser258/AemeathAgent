@@ -207,6 +207,18 @@ export function createToolGate(
       }
 
       const need = approvalNeedOf(tc, ctx)
+
+      // delete_file 特判（owner 硬要求）：除完全访问外**每次删除必弹审批**，
+      // 即使在工作区内也不放行；且不记"本会话允许"——allow-always 也只当次有效。
+      if (tc.name === 'delete_file') {
+        const target = approvalTargetPath(tc.name, tc.argsJson, ctx.workspace)
+        const reason =
+          `爱弥斯想删除：${target ?? tc.argsJson.slice(0, 80)}\n` +
+          '删除会移入回收站（可还原），但按你的设置每次删除都要单独确认；「完全访问」模式下才不再询问。'
+        const decision = await requestApproval('tool', [tc], reason)
+        return decision === 'allow' || decision === 'allow-always' ? 'allow' : 'deny'
+      }
+
       // 工作区内的变更、只读工具、MCP 工具、豁免工具 → 直接放行
       if (!need.required) return 'allow'
       // "本会话允许此工具"记忆命中 → 放行（用户已明确表示过信任）

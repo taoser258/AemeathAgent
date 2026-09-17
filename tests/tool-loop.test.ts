@@ -387,6 +387,48 @@ describe('runToolLoop · 空收尾重试', () => {
     // 没有工具动作，不该注入催办，也不该有第 2 轮
     expect(seen).toHaveLength(1)
   })
+
+  it('compactView 钩子（P8-T1）：替换发给模型的视图，但不改累积体与落盘', async () => {
+    const seen: ChatTurn[][] = []
+    const deps = makeScriptDeps(
+      [
+        resp({ text: '先看文件', toolCalls: [tc('c1', 'read_file')], finishReason: 'tool_calls' }),
+        resp({ text: '好', finishReason: 'stop' })
+      ],
+      seen
+    )
+    const calls: Array<{ view: number; lastUsage: unknown }> = []
+    deps.compactView = async (view, info) => {
+      calls.push({ view: view.length, lastUsage: info.lastUsage ?? null })
+      return [{ role: 'system', content: '压缩后的视图' }]
+    }
+    const messages: ChatTurn[] = [{ role: 'user', content: '看看 a.txt' }]
+    const r = await runToolLoop(messages, deps, deps.signal)
+
+    expect(r.stoppedReason).toBe('completed')
+    // 压缩视图确实被发给了模型（两轮都是）
+    expect(seen).toHaveLength(2)
+    expect(seen[0]).toEqual([{ role: 'system', content: '压缩后的视图' }])
+    // 但累积体照旧（原文没被动过）——压缩只作用于发送视图
+    expect(messages).toHaveLength(3)
+    expect(messages[0]).toEqual({ role: 'user', content: '看看 a.txt' })
+    // 第 1 轮没有上一轮 usage；第 2 轮带上了（真实用量驱动阈值判断）
+    expect(calls).toHaveLength(2)
+    expect(calls[0].lastUsage).toBeNull()
+  })
+
+  it('compactView 抛错 → 静默回退未压缩视图（压缩失败绝不中断对话）', async () => {
+    const seen: ChatTurn[][] = []
+    const deps = makeScriptDeps([resp({ text: '在的', finishReason: 'stop' })], seen)
+    deps.compactView = async () => {
+      throw new Error('摘要调用炸了')
+    }
+    const messages: ChatTurn[] = [{ role: 'user', content: '在吗' }]
+    const r = await runToolLoop(messages, deps, deps.signal)
+    expect(r.stoppedReason).toBe('completed')
+    expect(r.finalText).toBe('在的')
+    expect(seen[0]).toEqual([{ role: 'user', content: '在吗' }]) // 原样发出
+  })
 })
 
 // ── P5 补丁：轮次预算分段 + 自动续跑──
@@ -563,7 +605,7 @@ describe('清单催办（stepReminder / finishReminder）', () => {
     expect(r.rounds).toBe(2) // 只有"工具轮 + 收尾轮"
   })
 
-  it('finishReminder 非空 → 先不结束收尾，多要一轮；且**只催一次**', async () => {
+  it('finishReminder 非空 → 先不结束收尾，多要一轮；聚合器收口后第二次收尾放行', async () => {
     const deps = makeDeps([
       resp({ text: '都做完了！', finishReason: 'stop' }),
       resp({ text: '（同步完清单）都做完了。', finishReason: 'stop' })
@@ -575,9 +617,15 @@ describe('清单催办（stepReminder / finishReminder）', () => {
       return origCall(msgs, signal)
     }
     let asked = 0
+    let nudged = 0
+    // P7-T1 后额度归调用方聚合器（run.ts）管：这里模拟"只催一次"的聚合器
     deps.finishReminder = () => {
       asked += 1
-      return '（内部催办：有做完的项还挂着 pending）'
+      if (nudged === 0) {
+        nudged += 1
+        return '（内部催办：有做完的项还挂着 pending）'
+      }
+      return null
     }
 
     const r = await runToolLoop([{ role: 'user', content: '做任务' }], deps, deps.signal)
@@ -585,8 +633,41 @@ describe('清单催办（stepReminder / finishReminder）', () => {
     expect(r.stoppedReason).toBe('completed')
     expect(r.rounds).toBe(2) // 原计划 1 轮收尾 → 被催成 2 轮
     expect(r.finalText).toContain('同步完清单') // 最终文本取自被催后的那一轮
-    expect(asked).toBe(1) // 第二次收尾不再催（否则会来回拉扯）
+    expect(nudged).toBe(1)
+    expect(asked).toBe(2) // 收尾问了两次：第一次催出、第二次放行
     expect(JSON.stringify(seen[1])).toContain('还挂着 pending')
+  })
+
+  it('★ 保险丝：finishReminder 恒非空（聚合器失控）→ 循环最多拦两轮收尾', async () => {
+    const deps = makeDeps([
+      resp({ text: '一', finishReason: 'stop' }),
+      resp({ text: '二', finishReason: 'stop' }),
+      resp({ text: '三', finishReason: 'stop' })
+    ])
+    let asked = 0
+    deps.finishReminder = () => {
+      asked += 1
+      return '（一直催）'
+    }
+    const r = await runToolLoop([{ role: 'user', content: '做任务' }], deps, deps.signal)
+    // 额度上限 2 = 清单对账 + 引用护栏各一次（MAX_FINISH_NUDGES）
+    expect(asked).toBe(2)
+    expect(r.finalText).toBe('三')
+    expect(r.stoppedReason).toBe('completed')
+  })
+
+  it('★ P7-T1：finalText 原样交给判定方（引用护栏要用它扫链接）', async () => {
+    const deps = makeDeps([
+      resp({ text: '先查。', toolCalls: [tc('c1', 'web_search')], finishReason: 'tool_calls' }),
+      resp({ text: '出处见 https://fake.example/x', finishReason: 'stop' })
+    ])
+    const got: string[] = []
+    deps.finishReminder = (finalText) => {
+      got.push(finalText)
+      return null
+    }
+    await runToolLoop([{ role: 'user', content: '查资料' }], deps, deps.signal)
+    expect(got).toEqual(['出处见 https://fake.example/x'])
   })
 
   it('中断时不催办：abort 后直接收尾', async () => {

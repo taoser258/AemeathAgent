@@ -9,6 +9,7 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { markAppQuitting } from './windows/app-quit'
 import { createMainWindow, registerMainWindowIpc, showMainWindow } from './windows/main-window'
 import { createPetWindow, registerPetIpc, showPetWindow } from './windows/pet'
+import { createTray, notifyHiddenToTray } from './windows/tray'
 import { installMcpEnvResolver, registerSettingsIpc } from './settings/settings-ipc'
 import { registerChatIpc } from './chat/run'
 import { registerSessionsIpc } from './sessions/registry'
@@ -20,6 +21,7 @@ import { setMemoryBase } from './memory/memory-store'
 import { registerMemoryIpc } from './memory/memory-ipc'
 import { syncBuiltinServers } from './mcp/builtin-sync'
 import {
+  setDescribeImageProbe,
   setToolPathBase,
   setToolVisibility,
   setSearchHistoryBase,
@@ -32,12 +34,16 @@ import { printHtmlToPdf } from './pdf/print-pdf'
 import { setSkillDirs, setSkillDisabled } from './agent/skills'
 import { setLedgerBase } from './agent/tools/ledger'
 import { setTodoBase } from './agent/tools/todo-store'
+import { setCompactBase } from './chat/compact-store'
 import { setNotesBase } from './agent/tools/note-store'
 import { setProgressBase } from './agent/tools/progress-store'
 import { setReviewBase } from './agent/tools/review-store'
 import { sweepSessionStore } from './sessions/registry'
 import { mcpManager } from './mcp/manager'
 import { setScreenEnabled, setScreenProbe, windowsProbe } from './agent/tools/screen'
+import { setOcrProbe, windowsOcrProbe } from './agent/tools/ocr'
+import { makeVisionRunner } from './llm/vision'
+import { readProfileKey } from './llm/secrets'
 import { setMemoryEnabled } from './memory/gate'
 import { setPermissionMode } from './chat/permission'
 import { registerStickerScheme, registerStickerSupport } from './stickers'
@@ -110,6 +116,8 @@ if (!app.requestSingleInstanceLock()) {
     setLedgerBase(join(userDataDir(), 'ledger'))
     // 任务清单存储根
     setTodoBase(join(userDataDir(), 'todos'))
+    // 上下文摘要存储根（P8-T1；启动只 setBase 不建目录，写入时自建）
+    setCompactBase(join(userDataDir(), 'compact'))
     // 学习笔记存储根
     setNotesBase(join(userDataDir(), 'notes'))
     // 复习调度存储根
@@ -127,8 +135,17 @@ if (!app.requestSingleInstanceLock()) {
     void mcpManager.sync(readAppConfig(configDir()).mcp.servers)
     // 屏幕感知：隐私默认关——初始开关读配置，真实探针注入
     setScreenProbe(windowsProbe)
+    // 识图（P8-T3）：把"图 → 文字转述"的跑腿注入工具层（选视觉档案/取密钥在这里读配置）
+    setDescribeImageProbe(
+      makeVisionRunner({
+        readConfig: () => readAppConfig(configDir()),
+        readKey: (id) => readProfileKey(configDir(), id)
+      })
+    )
     const bootCfg = readAppConfig(configDir())
     setScreenEnabled(bootCfg.privacy.activeWindow)
+    // 本机 OCR（P8-T3 第二条腿）：注入 Windows.Media.Ocr 探针（不联网、不上传）
+    setOcrProbe(windowsOcrProbe)
     setMemoryEnabled(bootCfg.privacy.memory)
     // 权限模式：启动即同步"当前档位"，运行中切档由 settings-ipc 即时更新——
     // gate 原先在 run 开始时固化模式，切「完全访问」对正在跑的这轮不生效
@@ -146,7 +163,8 @@ if (!app.requestSingleInstanceLock()) {
         ledger: join(userDataDir(), 'ledger'),
         todos: join(userDataDir(), 'todos'),
         notes: join(userDataDir(), 'notes'),
-        checkpoint: checkpointDir()
+        checkpoint: checkpointDir(),
+        compact: join(userDataDir(), 'compact')
       })
       if (
         sweep.prunedRegistry.length > 0 ||
@@ -161,8 +179,11 @@ if (!app.requestSingleInstanceLock()) {
     } catch {
       /* 清扫失败不阻塞启动 */
     }
-    createMainWindow()
+    const main = createMainWindow()
     createPetWindow()
+    createTray()
+    // 关窗 = 最小化到托盘：首次隐藏时气泡提示一次（程序仍在运行、去哪找回）
+    main.on('hide', () => notifyHiddenToTray())
 
     app.on('activate', () => {
       // macOS：点 Dock 图标且无窗口时重建主窗（Windows 下不触发此事件）

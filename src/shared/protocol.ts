@@ -25,6 +25,9 @@ export type StreamEventType =
   // 运行期状态提示：自动续跑 / 连接重试这类「引擎自己在做事」的说明。
   // 渲染层在流式气泡下显示一行淡色文字——：不要光闪图标，说清在干嘛。
   | 'run_notice'
+  // 每轮真实 usage（prompt+completion）：用量环随轮次实时走，
+  // 否则多轮任务执行中环一直停在上轮的值、答完才跳变（owner 实测："答完突然暴涨"）。
+  | 'usage'
 
 /** thinking 事件载荷：模型思考的增量文本；供应商没给就没有此事件 */
 export interface ThinkingEventData {
@@ -38,11 +41,13 @@ export interface TodoUpdatedData {
 }
 
 /** run_notice 事件载荷：引擎侧「正在做什么」的状态说明。
- * auto-continue = 段预算用尽自动接着做 / 截断续写；retry = 瞬时错误自动重试。 */
+ * auto-continue = 段预算用尽自动接着做 / 截断续写；retry = 瞬时错误自动重试；
+ * cleanup = 任务结束后自动清理了临时文件；
+ * compact = 上下文压缩（P8-T1：更早的对话已摘要成一段转述，原始记录仍在会话档案里）。 */
 export interface RunNoticeData {
-  kind: 'auto-continue' | 'retry'
+  kind: 'auto-continue' | 'retry' | 'cleanup' | 'compact'
   text: string
-  /** 第几次（重试次数 / 第几段续跑），1 起 */
+  /** 第几次（重试次数 / 第几段续跑）；cleanup 固定 0 */
   attempt: number
 }
 

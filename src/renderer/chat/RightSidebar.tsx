@@ -595,6 +595,16 @@ function BrowserPanel(): React.JSX.Element {
     window.petAPI.browserNavigate(t)
   }
 
+  // 聊天里点外链：订阅 store 的待打开 URL（面板已挂载时点新链接也会触发，不只首次挂载）。
+  // 直接调外部 IPC 与外部 store（不在 effect 里 setState，loading 由浏览器状态回推）。
+  const pendingUrl = useChatStore((s) => s.browserPendingUrl)
+  useEffect(() => {
+    if (pendingUrl !== null) {
+      window.petAPI.browserNavigate(pendingUrl)
+      useChatStore.getState().consumeBrowserPendingUrl()
+    }
+  }, [pendingUrl])
+
   return (
     <div className="rs-body rs-browser">
       <div className="rs-browser-bar">

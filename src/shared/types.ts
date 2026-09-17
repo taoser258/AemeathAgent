@@ -22,8 +22,21 @@ export interface SessionMeta {
 /** API 协议。P0 仅实现 openai 兼容；anthropic 等为字段预留（UI 显示暂不支持） */
 export type ApiProtocol = 'openai' | 'anthropic' | 'gemini'
 
-/** 思考强度 */
-export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high'
+/**
+ * 思考强度。五档 + 'default'（= 不注入，跟随模型/请求层默认）。
+ * P8-T4 起从四档扩到六值：'xhigh'（超高）/ 'max'（极致）是新一代模型才有的档位，
+ * 各协议能表达的上限不同——实际发送前经 main/llm/reasoning.ts 的映射**钳制**（不报错）。
+ */
+export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/**
+ * OpenAI 兼容系端点的思考参数风格（P9-T1）。
+ * 同一个 reasoning_effort 字段各家语义不同（有的只认开关、有的枚举更宽），
+ * 档案按 Base URL 自动识别适配器；此处存的是用户**手动覆盖**值，缺省/undefined = 自动识别。
+ * 具体映射规则见 shared/reasoning-adapters.ts。
+ */
+export type ReasoningAdapterId =
+  'openai' | 'dashscope' | 'deepseek' | 'zhipu' | 'kimi' | 'ark' | 'mimo' | 'minimax'
 
 /** 一个可切换的模型配置档案 */
 export interface ModelProfile {
@@ -37,10 +50,25 @@ export interface ModelProfile {
   model: string
   /** 上下文窗口（token 数）；0 = 未设置（历史裁剪退化为条数上限） */
   context: number
+  /**
+   * 输出上限（tokens）；缺省 = 不发送该参数（交给模型默认）。
+   * P8-T4 起与输入窗口分开配置：输入 = context，输出 = 这里。
+   */
+  maxOutput?: number
   /** 是否开启多模态 */
   multimodal: boolean
   /** 思考强度：按协议注入（openai=reasoning_effort / anthropic=thinking 预算 / gemini=thinkingBudget）；缺省 = 不注入 */
   reasoningEffort?: ReasoningEffort
+  /**
+   * 该模型**支持**的思考档位（P8-T4，多选）：编辑里勾选，聊天区右键模型时才给出可调的档位。
+   * 缺省/空数组 = 该模型不支持思考（右键菜单置灰并指路）。默认档位必须在其中，否则回退到首项。
+   */
+  reasoningLevels?: ReasoningEffort[]
+  /**
+   * 思考参数风格（P9-T1）：仅 openai 兼容协议有意义。
+   * undefined = 按 baseUrl 宿主自动识别；显式值 = 手动覆盖（中转网关识别不准时的逃生口）。
+   */
+  reasoningAdapter?: ReasoningAdapterId
 }
 
 /** 应用配置，对应 userData/config/app.json */
@@ -57,6 +85,13 @@ export interface AppConfig {
     profiles: ModelProfile[]
     /** 当前激活档案 id；merge 后保证存在于 profiles 中 */
     activeId: string
+    /**
+     * 视觉档案（P8-T3）：当前档案没开多模态时，用哪个档案替它"看图"。
+     * '' = 自动（优先激活档案自己，否则挑第一个开启多模态且配了密钥的档案）；
+     * 'off' = 不做识图转述（关掉这条腿）；其它值 = 指定档案 id。
+     * 取值常量见 main/llm/vision.ts 的 VISION_AUTO / VISION_OFF。
+     */
+    visionProfileId: string
   }
   persona: {
     /** 当前激活的人设目录名，对应项目内 personas/<name>/ */
@@ -142,6 +177,17 @@ export interface AppConfig {
   ui: {
     /** 学习模式顶部的「学习笔记」卡（note_write 计数 + 导出入口）。默认关——显式开启才显示 */
     notesCard: boolean
+  }
+  /**
+   * 聊天行为（P8-T1 起）。
+   */
+  chat: {
+    /**
+     * 上下文自动压缩：会话接近模型窗口时，把更早的对话摘要成一段"转述"，
+     * **只压缩发给模型的视图**（会话原档一条不删，回看/搜索仍是原文）。
+     * 缺省开（治长会话撞厂商内容审核 + 省钱提速）；设置里可关。
+     */
+    autoCompact: boolean
   }
   /**
    * 用户个人信息（反馈批次④，只增不改）：设置页「个人」分区填写。
@@ -294,6 +340,8 @@ export interface SettingsPatch {
   appearance?: Partial<AppConfig['appearance']>
   /** 界面偏好：按键局部替换 */
   ui?: Partial<AppConfig['ui']>
+  /** 聊天行为（P8-T1）：按键局部替换 */
+  chat?: Partial<AppConfig['chat']>
   /** 用户个人信息（反馈批次④）：按键局部替换（只传 nickname 就只改昵称） */
   user?: Partial<AppConfig['user']>
 }

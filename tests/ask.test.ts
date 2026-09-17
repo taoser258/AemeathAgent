@@ -1,8 +1,49 @@
 // ask_user 纯逻辑单测：参数解析规范化 / 答案格式化 / 挂起流程编排。
 
 import { describe, expect, it } from 'vitest'
-import { formatAskResult, handleAskTool, parseAskArgs } from '../src/main/chat/ask'
+import { formatAskResult, handleAskTool, parseAskArgs, repairJsonText } from '../src/main/chat/ask'
 import type { AskAnswer, AskQuestion } from '../src/shared/protocol'
+
+describe('ask_user · 参数容错（owner 实测：一直调用失败）', () => {
+  it('★ 字符串里混入裸 \\r / \\n（模型常见毛病）→ 修复后照样能解析', () => {
+    // owner 实测那条：她在思考里都写了"`\r` 混进去了"，而严格 parse 会整条拒绝
+    const broken =
+      '{"questions":[{"id":"q1","prompt":"要哪一版？\r\n请选一个","type":"single","options":["甲","乙"]}]}'
+    const parsed = parseAskArgs(broken)
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) {
+      expect(parsed.questions).toHaveLength(1)
+      expect(parsed.questions[0].prompt).toContain('要哪一版？')
+      expect(parsed.questions[0].options).toEqual(['甲', '乙'])
+    }
+  })
+
+  it('裸制表符同样修好；已转义的 \\n 不受影响（不会二次转义）', () => {
+    expect(parseAskArgs('{"questions":[{"id":"q1","prompt":"A\tB","type":"text"}]}').ok).toBe(true)
+    const parsed = parseAskArgs(
+      '{"questions":[{"id":"q1","prompt":"第一行\\n第二行","type":"text"}]}'
+    )
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) expect(parsed.questions[0].prompt).toBe('第一行\n第二行')
+  })
+
+  it('```json 包裹也吃掉（模型偶尔套一层代码块）', () => {
+    const wrapped =
+      '```json\n{"questions":[{"id":"q1","prompt":"要不要覆盖？","type":"single","options":["要","不要"]}]}\n```'
+    expect(parseAskArgs(wrapped).ok).toBe(true)
+  })
+
+  it('真·语法错误仍然拒绝，但错误文案给出可执行的下一步', () => {
+    const r = parseAskArgs('{"questions":[{"id":"q1"')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('JSON')
+  })
+
+  it('repairJsonText 不动合法 JSON（幂等）', () => {
+    expect(repairJsonText('{"a":"x","b":1}')).toBe('{"a":"x","b":1}')
+    expect(repairJsonText('{"a":"x\\\\y"}')).toBe('{"a":"x\\\\y"}')
+  })
+})
 
 describe('parseAskArgs（题目解析与防御规范化）', () => {
   it('合法单选：保留选项与必答缺省', () => {

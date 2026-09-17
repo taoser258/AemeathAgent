@@ -14,9 +14,11 @@ import {
   WIN_WINDOW_MAXIMIZED,
   WIN_WINDOW_MAXIMIZED_GET,
   WIN_WINDOW_MOVE_TO,
-  WIN_WINDOW_SET_BOUNDS
+  WIN_WINDOW_SET_BOUNDS,
+  BROWSER_OPEN_LINK
 } from '@shared/ipc-channels'
 import { isAppQuitting } from './app-quit'
+import { maximizedBounds } from './maximize-bounds'
 import { appendDebugLog } from '../log'
 import { appIconPath, logsDir } from '../paths'
 import { attachEditContextMenu } from './edit-menu'
@@ -99,6 +101,17 @@ export function createMainWindow(): BrowserWindow {
   window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  // ★ 站内导航兜底：<a href> 漏网（未经渲染层拦截）时默认会让整个主窗跳走、
+  // 应用被网页覆盖且退不回来（实测事故）。这里拦下外链，转发渲染层走右侧栏浏览器；
+  // 应用自身加载（dev 热更新 / file://）保持放行。
+  window.webContents.on('will-navigate', (e, url) => {
+    const current = window.webContents.getURL()
+    if (url === current) return
+    if (!/^https?:\/\//i.test(url)) return // file:// 与 dev 内部跳转不管
+    e.preventDefault()
+    if (!window.isDestroyed()) window.webContents.send(BROWSER_OPEN_LINK, url)
   })
 
   window.on('closed', () => {
@@ -268,8 +281,9 @@ function toggleManualMaximize(win: BrowserWindow): void {
   } else {
     const bounds = win.getBounds()
     manualMaximized.set(win, bounds)
-    const area = screen.getDisplayMatching(bounds).workArea
-    win.setBounds({ x: area.x, y: area.y, width: area.width, height: area.height })
+    // 目标框见 maximize-bounds：任务栏自动隐藏时底部留 1px，避免被 shell 当成
+    // 全屏应用而抑制任务栏弹出（owner 实测：贴底唤不出任务栏）
+    win.setBounds(maximizedBounds(screen.getDisplayMatching(bounds)))
   }
   notifyMaximized(win)
 }

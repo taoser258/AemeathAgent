@@ -13,6 +13,11 @@ type PanelMode = 'work' | 'learn'
  * 漏补不影响功能——缺省 'all' 全可见，只是不出现在此面板）。 */
 const BUILTIN_TOOLS: Array<{ name: string; label: string; desc: string }> = [
   { name: 'current_time', label: '当前时间', desc: '查询今天的日期、星期与精确时间' },
+  {
+    name: 'calculate',
+    label: '算数计算',
+    desc: '单条算式精确求值——百分比/多步连算/总价折扣先走它，不让她心算'
+  },
   { name: 'read_file', label: '读取文件', desc: '读取本地文本文件内容' },
   { name: 'list_dir', label: '列出目录', desc: '查看目录里有哪些文件与子目录' },
   {
@@ -20,7 +25,17 @@ const BUILTIN_TOOLS: Array<{ name: string; label: string; desc: string }> = [
     label: '写入文件',
     desc: '新建或覆盖文件（变更类，写前自动快照；工作区内免询问）'
   },
-  { name: 'mkdir', label: '创建目录', desc: '递归新建目录（变更类，记账可撤销）' },
+  { name: 'mkdir', label: '创建目录', desc: '递归新建文件夹（变更类，记账可撤销）' },
+  {
+    name: 'mark_temp_files',
+    label: '登记中间产物',
+    desc: '她主动登记本轮自己产生的中间产物，任务收尾才清理；没登记的一律不动（防误删）'
+  },
+  {
+    name: 'delete_file',
+    label: '删除到回收站',
+    desc: '把文件/文件夹移入回收站可还原；非完全访问模式每次删除都会请你确认'
+  },
   {
     name: 'edit_file',
     label: '编辑文件',
@@ -66,6 +81,16 @@ const BUILTIN_TOOLS: Array<{ name: string; label: string; desc: string }> = [
     name: 'active_window',
     label: '屏幕感知',
     desc: '知道你当前在用什么应用（还需在 设置 → 桌宠 → 隐私 开启）'
+  },
+  {
+    name: 'describe_image',
+    label: '识图',
+    desc: '看工作区里的截图/图表/报错弹窗（图片会发往设置里的「视觉档案」）'
+  },
+  {
+    name: 'ocr_image',
+    label: '本机识字',
+    desc: '用 Windows 自带 OCR 逐字抄图里的文字（不联网，数字/编号更准）'
   },
   { name: 'note_write', label: '记录学习笔记', desc: '把知识点与闪卡写进学习笔记' },
   { name: 'note_read', label: '回顾学习笔记', desc: '回显本会话已记的笔记与闪卡' },

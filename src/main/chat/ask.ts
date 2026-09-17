@@ -13,15 +13,84 @@ export type AskParse =
   { ok: false; error: string } | { ok: true; title: string | null; questions: AskQuestion[] }
 
 /**
+ * 参数容错修复（纯函数）：模型给的 JSON 里**字符串内出现裸控制字符**是常见毛病
+ * （把多行 prompt 直接写成真换行/回车 —— 实测她自己在思考里都写了"`\r` 混进去了"）。
+ * 严格 JSON.parse 会整条拒绝 → 一次能问完的事变成反复失败重试。
+ *
+ * 做法：逐字符扫描，跟踪"是否在字符串内"；在字符串内遇到 U+0000–U+001F 就换成
+ * 对应的转义序列（\r \n \t 或 \u00XX），字符串外原样保留（控制字符在结构位置本来就是非法的）。
+ * 顺带剥掉模型偶尔加的 ```json 代码块包裹与前后空白。
+ */
+export function repairJsonText(raw: string): string {
+  let text = raw.trim()
+  // ```json ... ``` / ``` ... ``` 包裹（模型偶尔会套一层）
+  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(text)
+  if (fence !== null) text = fence[1].trim()
+
+  let out = ''
+  let inString = false
+  let escaped = false
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) {
+        out += ch
+        escaped = false
+        continue
+      }
+      if (ch === '\\') {
+        out += ch
+        escaped = true
+        continue
+      }
+      if (ch === '"') {
+        out += ch
+        inString = false
+        continue
+      }
+      const code = ch.charCodeAt(0)
+      if (code < 0x20) {
+        // 裸控制字符 → 转义（JSON 规范里字符串内必须转义）
+        if (ch === '\n') out += '\\n'
+        else if (ch === '\r') out += '\\r'
+        else if (ch === '\t') out += '\\t'
+        else out += `\\u${code.toString(16).padStart(4, '0')}`
+        continue
+      }
+      out += ch
+      continue
+    }
+    if (ch === '"') inString = true
+    out += ch
+  }
+  return out
+}
+
+/** 解析：先按原样，再按容错修复后的文本（修复见 repairJsonText） */
+function parseLoose(argsJson: string): { title?: unknown; questions?: unknown } | null {
+  try {
+    return JSON.parse(argsJson) as { title?: unknown; questions?: unknown }
+  } catch {
+    try {
+      return JSON.parse(repairJsonText(argsJson)) as { title?: unknown; questions?: unknown }
+    } catch {
+      return null
+    }
+  }
+}
+
+/**
  * 解析并校验 ask_user 的 argsJson → 规范化题目。
  * 选择类缺选项退化成 text（比弹个没选项的空框好）；全部非法则报错不挂起。
  */
 export function parseAskArgs(argsJson: string): AskParse {
-  let parsed: { title?: unknown; questions?: unknown }
-  try {
-    parsed = JSON.parse(argsJson) as typeof parsed
-  } catch {
-    return { ok: false, error: 'ask_user 参数不是合法 JSON，请重发。' }
+  const parsed = parseLoose(argsJson)
+  if (parsed === null) {
+    return {
+      ok: false,
+      error:
+        'ask_user 参数不是合法 JSON（常见原因：字符串里写了真换行/回车）。' +
+        '请把每个字符串写成一行、用 \\n 表示换行，然后重发。'
+    }
   }
   const rawQs = Array.isArray(parsed.questions) ? parsed.questions : []
   if (rawQs.length === 0) {

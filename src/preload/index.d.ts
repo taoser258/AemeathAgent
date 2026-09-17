@@ -12,6 +12,7 @@ import type {
   UpdateStatus
 } from '../shared/types'
 import type { StreamEvent } from '../shared/protocol'
+import type { MemoryEntry } from '../shared/memory'
 
 /** 渲染进程唯一可用的 API 白名单（window.petAPI），与 preload/index.ts 保持同步 */
 export interface PetApi {
@@ -54,6 +55,9 @@ export interface PetApi {
 
   /** 工作中插话：任务运行中把消息注入下一轮上下文；false = 没有活跃任务（回退普通发送） */
   chatNudge(sessionId: string, text: string): Promise<boolean>
+
+  /** 手动压缩上下文（P8-T1）：把该会话更早的对话摘要成转述，下次请求起生效 */
+  chatCompact(sessionId: string): Promise<{ ok: boolean; message: string }>
 
   /** 表情包文件名列表（内容经 sticker:// 协议按需加载） */
   stickersList(): Promise<string[]>
@@ -271,6 +275,8 @@ export interface PetApi {
   onBrowserState(
     cb: (s: { url: string; loading: boolean; canBack: boolean; canForward: boolean }) => void
   ): () => void
+  /** 主窗拦下的漏网外链（http/https）：应在右侧栏内置浏览器打开 */
+  onOpenLink(cb: (url: string) => void): () => void
 
   /** 用系统默认应用打开工作区文件（pptx 等不支持内联预览的格式） */
   workspaceOpenPath(rel: string): Promise<{ ok: boolean; error?: string }>
@@ -289,6 +295,11 @@ export interface PetApi {
     }>
   >
   memoryDelete(id: string): Promise<{ ok: boolean; error?: string }>
+  /** 编辑一条记忆正文（主进程先快照再改；空内容/不存在返回 ok:false） */
+  memoryUpdate(
+    id: string,
+    content: string
+  ): Promise<{ ok: boolean; error?: string; entry?: MemoryEntry }>
   memoryClear(): Promise<{ ok: boolean }>
 
   /** 工作区内容检索（右侧栏搜索面板） */

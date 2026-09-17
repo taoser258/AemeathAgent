@@ -22,6 +22,7 @@ import {
   CHAT_ANSWER,
   CHAT_APPROVE,
   CHAT_CANCEL,
+  CHAT_COMPACT,
   CHAT_NUDGE,
   CHAT_SEND,
   CHAT_STREAM,
@@ -40,12 +41,14 @@ import {
   WORKSPACE_REVEAL,
   WORKSPACE_OPEN_EXTERNAL,
   BROWSER_SET_BOUNDS,
+  BROWSER_OPEN_LINK,
   BROWSER_NAVIGATE,
   BROWSER_GO_BACK,
   BROWSER_GO_FORWARD,
   BROWSER_RELOAD,
   BROWSER_STATE,
   MEMORY_LIST,
+  MEMORY_UPDATE,
   MEMORY_DELETE,
   MEMORY_CLEAR,
   SEARCH_CONTENT,
@@ -156,8 +159,14 @@ const petAPI = {
   /** 工作中插话：任务运行中把消息注入下一轮上下文；false = 没有活跃任务（回退普通发送） */
   chatNudge: (sessionId: string, text: string): Promise<boolean> =>
     ipcRenderer.invoke(CHAT_NUDGE, sessionId, text),
+
+  /** 手动压缩上下文（P8-T1）：把该会话更早的对话摘要成转述，下次请求起生效 */
+  chatCompact: (sessionId: string): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(CHAT_COMPACT, sessionId),
   // 记忆管理
   memoryList: (): Promise<MemoryEntry[]> => ipcRenderer.invoke(MEMORY_LIST),
+  memoryUpdate: (id: string, content: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(MEMORY_UPDATE, id, content),
   memoryDelete: (id: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke(MEMORY_DELETE, id),
   memoryClear: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(MEMORY_CLEAR),
@@ -374,6 +383,14 @@ const petAPI = {
     ipcRenderer.on(BROWSER_STATE, listener)
     return (): void => {
       ipcRenderer.removeListener(BROWSER_STATE, listener)
+    }
+  },
+  // 主窗 will-navigate 兜底：漏网外链被主进程拦下后转发到这里 → 侧栏浏览器
+  onOpenLink: (cb: (url: string) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, url: string): void => cb(url)
+    ipcRenderer.on(BROWSER_OPEN_LINK, listener)
+    return (): void => {
+      ipcRenderer.removeListener(BROWSER_OPEN_LINK, listener)
     }
   },
   // 终端 v2

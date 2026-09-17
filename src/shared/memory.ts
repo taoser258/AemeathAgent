@@ -120,8 +120,10 @@ export function tokenize(text: string): string[] {
 
 /**
  * 对一组条目按「与查询的相关度」打分排序（降序）。
- * 打分 = 条目 keywords（小写集合）被查询词元命中的数量；同分按 updatedAt 新者优先。
- * 返回带 score 的新数组（不改原条目）。
+ * 打分口径（P7-T3 起正文也参与——否则手动改过的内容搜不到）：
+ * - 关键词命中（keywords 被查询词元包含/反包含）每条 +2——规范词是提炼产出，权重高；
+ * - 正文命中（查询词元在 content 的 2-gram 集合里精确出现）每词 +1；
+ * 同分按 updatedAt 新者优先。返回带 score 的新数组（不改原条目）。
  */
 export function scoreEntries(
   entries: MemoryEntry[],
@@ -130,10 +132,11 @@ export function scoreEntries(
   const qTokens = new Set(tokenize(query))
   if (qTokens.size === 0) return []
   const scored = entries.map((entry) => {
-    const kw = entry.keywords.map((k) => k.toLowerCase())
     let score = 0
+    const contentTokens = new Set(tokenize(entry.content))
     for (const t of qTokens) {
-      if (kw.some((k) => k.includes(t) || t.includes(k))) score += 1
+      if (entry.keywords.some((k) => k.toLowerCase().includes(t) || t.includes(k))) score += 2
+      if (contentTokens.has(t)) score += 1
     }
     return { entry, score }
   })

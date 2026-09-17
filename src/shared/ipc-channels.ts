@@ -20,6 +20,9 @@ export const CHAT_STREAM = 'chat:stream'
 /** 工作中插话（steering 机制）：任务运行中把用户消息注入下一轮上下文 */
 export const CHAT_NUDGE = 'chat:nudge'
 
+/** 手动压缩上下文（P8-T1）：渲染 → 主，把该会话更早的对话摘要成一段转述（下次请求起生效） */
+export const CHAT_COMPACT = 'chat:compact'
+
 /** 表情包：渲染 → 主，列出 resources/stickers 下的文件名（sticker:// 协议负责内容服务） */
 export const STICKER_LIST = 'sticker:list'
 
@@ -77,8 +80,9 @@ export const WORKSPACE_TODO_TOGGLE = 'workspace:todo-toggle'
 /** 右侧栏浏览器：外链交给系统默认浏览器 */
 export const WORKSPACE_OPEN_EXTERNAL = 'workspace:open-external'
 
-/** 记忆管理：列表 / 删除一条 / 清空全部 */
+/** 记忆管理：列表 / 编辑一条 / 删除一条 / 清空全部 */
 export const MEMORY_LIST = 'memory:list'
+export const MEMORY_UPDATE = 'memory:update'
 export const MEMORY_DELETE = 'memory:delete'
 export const MEMORY_CLEAR = 'memory:clear'
 
@@ -89,6 +93,8 @@ export const WORKSPACE_OPEN_PATH = 'workspace:open-path'
 
 /** 内嵌浏览器（v17，主进程 WebContentsView）：bounds 上报（null=隐藏） */
 export const BROWSER_SET_BOUNDS = 'browser:set-bounds'
+/** 主窗 webContents 试图站内导航外链时，主进程拦下后转发渲染层（走侧栏浏览器） */
+export const BROWSER_OPEN_LINK = 'browser:open-link'
 /** 内嵌浏览器：导航到 url（渲染层 normalize 后传原始串，主进程兜底同规则） */
 export const BROWSER_NAVIGATE = 'browser:navigate'
 /** 内嵌浏览器：后退 / 前进 / 刷新 */
