@@ -68,6 +68,10 @@ export function resolvePlaywrightCliPath(): string {
  * 需要看过程时用户可自行在设置页把 `--headless` 去掉（参数可编辑）
  * - `--browser msedge`：用系统 Edge，免下载 Chromium
  * - `--output-dir`：截图/页面快照落到应用数据目录，不落到工作目录
+ * - `cwd`：**子进程工作目录也钉到同一个目录**。`--output-dir` 只管自动命名的产物，
+ *   而 `browser_take_screenshot` 带 `filename` 时是按**进程 CWD** 解析的——
+ *   CWD 缺省继承应用目录，于是截图落进仓库根/安装目录（2026-09-17 实测：
+ *   一次奶牛任务在仓库根留下 cow-shot-1.png / cow-shot-2.png / cow-zoom.png）。
  */
 export function buildPlaywrightConfig(cliPath: string, ctx: BuiltinContext): ServerConfig {
   return {
@@ -84,6 +88,7 @@ export function buildPlaywrightConfig(cliPath: string, ctx: BuiltinContext): Ser
       '--output-dir',
       ctx.outputDir
     ],
+    cwd: ctx.outputDir,
     env: { ELECTRON_RUN_AS_NODE: '1' },
     // 浏览器操作天然比普通工具慢（导航、等待选择器），给 2 分钟；仍可按 server 覆盖
     toolCallTimeoutMs: 120_000,
@@ -166,12 +171,19 @@ export function ensureBuiltinServers(
     if (!sameConnection(existing, expected)) {
       // ③ 过期（应用升级后安装路径变化等）→ 就地校正：
       // 保留用户的 id / 名称 / 开关 / 命名空间 / 适用模式 / 超时，只把连接参数换新
-      next[index] = {
+      const fixed: ServerConfig = {
         ...existing,
         command: expected.command,
-        args: expected.args,
-        ...(expected.env !== undefined ? { env: expected.env } : {})
+        args: expected.args
       }
+      // env / cwd 由内置定义**整体拥有**：定义里没有的就从配置里删掉。
+      // 否则 sameConnection 永远判不等 → 每次启动都白写一次配置
+      // （2026-09-17 实测：只搬 command/args/env 时，新加的 cwd 永远补不进去）。
+      if (expected.env !== undefined) fixed.env = expected.env
+      else delete fixed.env
+      if (expected.cwd !== undefined) fixed.cwd = expected.cwd
+      else delete fixed.cwd
+      next[index] = fixed
       changed = true
     }
   }

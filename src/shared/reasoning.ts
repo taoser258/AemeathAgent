@@ -189,11 +189,3 @@ export function reasoningSummary(plan: ReasoningPlan): string {
   if (plan.level === 'default') return '不注入（跟随模型默认）'
   return plan.budget !== undefined ? `${name} · ${plan.budget.toLocaleString()} tokens` : name
 }
-
-/**
- * 只取"附加说明"（预算 tokens）——滑条浮出已经把档位名写在前面了，
- * 再拼一次整串就会出现「中 · 中 · 10,240 tokens」这种重复（实测踩到过）。
- */
-export function reasoningDetail(plan: ReasoningPlan): string {
-  return plan.budget !== undefined ? `${plan.budget.toLocaleString()} tokens` : ''
-}

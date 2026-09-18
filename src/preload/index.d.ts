@@ -41,10 +41,17 @@ export interface PetApi {
   }>
   /** 自动更新：检查 / 下载 / 重启安装 / 打开 Releases + 状态订阅 */
   updateCheck(): Promise<UpdateStatus>
+  /** 只读当前更新状态（不触发网络检查）：主窗设置入口的「有新版本」角标对账用 */
+  updateStatusGet(): Promise<UpdateStatus>
   updateDownload(): Promise<UpdateStatus>
   updateQuitInstall(): Promise<{ ok: boolean }>
   updateOpenReleases(): Promise<{ ok: boolean }>
   onUpdateStatus(cb: (s: UpdateStatus) => void): () => void
+  /** 提示词优化（P9-T4）：把原文改写成更清楚的版本；不带会话历史、不自动发送 */
+  promptOptimize(
+    text: string,
+    mode: 'chat' | 'work' | 'learn'
+  ): Promise<{ ok: true; text: string } | { ok: false; error: string }>
   /** 发送一条聊天消息（可带附件）；runId 随后经 onChatStream 关联流式事件 */
   chatSend(
     sessionId: string,
@@ -235,6 +242,12 @@ export interface PetApi {
   windowSetBounds(bounds: { x: number; y: number; width: number; height: number }): void
   /** 订阅头顶气泡文本；返回解绑函数 */
   onPetBubble(callback: (text: string) => void): () => void
+  /** 桌宠被点了一下（渲染层区分 tap/drag 后上报） */
+  petTap(): void
+  /** 桌宠被拖动了一段 */
+  petDragged(): void
+  /** 打开主窗（点气泡入口） */
+  openMainWindow(): void
   /** 保存某 MCP server 的 env 密钥：加密落盘，读不回明文 */
   mcpSetSecret(payload: { namespace: string; varName: string; value: string })
 

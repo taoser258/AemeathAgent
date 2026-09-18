@@ -43,12 +43,19 @@ export interface TodoUpdatedData {
 /** run_notice 事件载荷：引擎侧「正在做什么」的状态说明。
  * auto-continue = 段预算用尽自动接着做 / 截断续写；retry = 瞬时错误自动重试；
  * cleanup = 任务结束后自动清理了临时文件；
+ * verify = 收尾核对：她声称写好的文件在工作区里找不到（可能没真写）；
  * compact = 上下文压缩（P8-T1：更早的对话已摘要成一段转述，原始记录仍在会话档案里）。 */
 export interface RunNoticeData {
-  kind: 'auto-continue' | 'retry' | 'cleanup' | 'compact'
+  kind: 'auto-continue' | 'retry' | 'cleanup' | 'verify' | 'compact'
   text: string
   /** 第几次（重试次数 / 第几段续跑）；cleanup 固定 0 */
   attempt: number
+  /**
+   * cleanup / verify 专用：这条通知同时已作为 notice 消息落盘，这里是它的消息 id。
+   * 渲染层据此把"本次会话内的即时显示"与"重启后从盘上恢复的那条"认成同一条，
+   * 不会出现两条一样的通报。
+   */
+  messageId?: string
 }
 
 /** agent_started 事件载荷：子任务分身开始运行。
@@ -162,7 +169,13 @@ export interface ToolApprovalRequestData {
   reason?: string
 }
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
+/**
+ * 消息角色。
+ * notice = 系统通知（任务收尾的自动清理结果这类"事实通报"）：**会落盘进会话档案**，
+ * 但**永远不进 LLM 上下文**（projectPersistedHistory 直接跳过）——它是给用户看的，
+ * 不是对话的一轮。与 system（只存在于请求侧的系统提示）语义严格区分。
+ */
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool' | 'notice'
 
 /**
  * 主进程 → 渲染进程的流式事件（经通道 chat:stream 推送）。

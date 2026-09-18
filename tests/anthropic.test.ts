@@ -166,6 +166,33 @@ describe('AnthropicStreamAggregator（SSE 事件聚合）', () => {
     expect(f.cacheKnown).toBe(true)
   })
 
+  it('★ 输入口径：Anthropic 的 input_tokens 不含缓存 → promptTokens 必须是三者之和', () => {
+    // 实测（owner 的 dots3 会话）：input_tokens=548 而 cache_read=143360，
+    // 旧口径把 548 当输入 → 上下文环低报、压缩永不触发、缓存命中率算成 663%。
+    const agg = new AnthropicStreamAggregator()
+    agg.feed({
+      type: 'message_start',
+      message: {
+        usage: {
+          input_tokens: 548,
+          cache_read_input_tokens: 143360,
+          cache_creation_input_tokens: 2000
+        }
+      }
+    })
+    agg.feed({
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn' },
+      usage: { output_tokens: 135 }
+    })
+    const f = agg.finalize()
+    expect(f.usage?.promptTokens).toBe(548 + 143360 + 2000) // 145908
+    expect(f.usage?.completionTokens).toBe(135)
+    expect(f.usage?.totalTokens).toBe(145908 + 135)
+    // 命中率分母（promptTokens）必须 ≥ 分子（cachedTokens），否则显示会 >100%
+    expect(f.cachedTokens ?? 0).toBeLessThanOrEqual(f.usage?.promptTokens ?? 0)
+  })
+
   it('end_turn → finishReason stop；无增量 tokPerS=0', () => {
     const agg = new AnthropicStreamAggregator()
     agg.feed({ type: 'message_start', message: { usage: { input_tokens: 5 } } })

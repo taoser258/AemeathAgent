@@ -38,6 +38,11 @@ export interface PromptContext {
   /** 长期记忆开关：显式 false 时附录写明"记忆关闭"，
    * 免得用户关着开关说"记住…"而她回答"好的记住了"（工具其实已不可用）。 */
   memoryEnabled?: boolean
+  /**
+   * 桌宠气泡档位（P9-T5）：off/greet/all，缺省按 greet。
+   * 只用来让模型对自身形态的认知与 UI 事实一致——气泡何时冒由应用决定，不是模型。
+   */
+  bubbleLevel?: 'off' | 'greet' | 'all'
 }
 
 /** 各段之间的分隔线：独立成段，避免 soul/style 的尾部标题与下一段粘连 */
@@ -62,7 +67,9 @@ export function buildRuntimeAppendix(ctx: PromptContext = {}): string {
     '# 运行时附录',
     '',
     `- 当前时间：${date} ${time}（用户本地时间）。聊到"今天/现在"时以它为准，不要凭空猜日期。`,
-    '- 你此刻以桌面应用 Aemeath 的形态陪伴用户：主窗是你的聊天窗口，回复内容都展示在主窗里（桌宠是常驻桌面的形象入口，不再单独冒气泡）。',
+    ctx.bubbleLevel === 'off'
+      ? '- 你此刻以桌面应用 Aemeath 的形态陪伴用户：主窗是你的聊天窗口，回复内容都展示在主窗里；桌宠是你常驻桌面的形象入口（头顶气泡已被用户关闭，不会说话）。'
+      : '- 你此刻以桌面应用 Aemeath 的形态陪伴用户：主窗是你的聊天窗口，回复内容都展示在主窗里；桌宠是你常驻桌面的形象——应用会在启动、被点、任务收尾等时机让她头顶冒一句短气泡（由应用按频率与免打扰规则安排）。**你不用决定气泡何时冒、也不用预告气泡内容**，正常在主窗回复即可。',
     '- 回复长度遵循 style.md 的分档：聊天窗口支持 Markdown 与公式，但日常闲聊保持自然短句。',
     ctx.memoryEnabled === false
       ? '- 用户关闭了长期记忆：你没有"记住"的能力。用户说"记住…"时如实说明记忆功能已关闭（提示可在 设置 → 记忆 打开），并问清是否改用笔记（note_write）或写进文件留存。'
@@ -137,17 +144,25 @@ export function buildRuntimeAppendix(ctx: PromptContext = {}): string {
   // 思考语言：
   // 实测仍会中英混杂——原因是工具返回值常是英文（MCP/Playwright/报错），
   // 模型跟着工具结果"续写英文"。所以除了"从第一个字起用中文"，还要显式点出**不要跟
-  // 着工具结果切语言**。位置放在**整个系统提示的最后**（近因效应最强）。
-  lines.push(
-    '',
+  // 着工具结果切语言**。
+  //
+  // ★ 位置（2026-09-17 修正）：这段话原本写在本函数末尾，但 buildSystemPrompt 之后还要
+  //   追加「开工方式 / 学习守则 / 计划模式」三段长文 → 实际效果是"最后读到的是开工方式"，
+  //   "近因效应最强"从来没成立过（owner 实测：换 Anthropic 协议的模型上思考大面积跑英文）。
+  //   现在抽成独立段 buildThinkingLanguageAppendix()，由 buildSystemPrompt **真正排在最后**。
+  return lines.join('\n')
+}
+
+/** 思考语言守则：必须由 buildSystemPrompt 放到**整个系统提示的最后**（近因效应最强） */
+export function buildThinkingLanguageAppendix(): string {
+  return [
     '# 思考语言（硬性要求）',
     '',
     '- 你的思考过程（内部推理）必须从第一个字起就用中文书写，全程不切换语言。',
     '- 工具返回值、报错信息、网页内容、第三方文档常是英文——**不要跟着它们换成英文思考**；引用原文时把英文留在引号里即可，你自己的分析、判断、权衡一律写整句中文。',
     '- 用户用英文提问时，也用中文思考（回复用哪种语言听用户的）。',
     '- 代码标识符、shell 命令、API 名、报错原文与专有名词可保留原文。'
-  )
-  return lines.join('\n')
+  ].join('\n')
 }
 
 /** 学习模式辅导守则：三段式 + 复习队列与进度。 */
@@ -188,7 +203,7 @@ export function buildWorkflowAppendix(): string {
     '3. 问要问得值：一次问全（1-4 题，每题给好选项让用户点一下就能答），别挤牙膏式来回追问；用户答不上也能跳过，跳过后按你判断的最佳方案继续，不要卡住。',
     '4. 反过来，能自己合理决定的琐事不要问（那是打扰），用户已经交代过的不要重复问。',
     '5. **算数别心算**：涉及任何算术（百分比换算、多步连算、总价/折扣/天数差），先调 calculate 拿到精确数值再回答——多位数心算容易错且错得自然。百分数自己换成小数（17.5% 写 0.175）；calculate 只认单条算式，要用开方/三角函数/日期函数或多步编程计算才走 run_js。',
-    '6. **中间产物要显式登记**：任务里你自己产生的临时脚本/中间数据/调试日志，确认没用后调 mark_temp_files 登记，任务正常结束时系统会把它们移入回收站。**不登记就绝不会被自动清理**——所以登记是"要不要留"的唯一表态：用户要求保留或交付的文件（报告、成品、他让你建的文件）一律不许登记；拿不准就不登记（留着不亏，登记错了才是真损失）。用户的文件要删时另走 delete_file（每次都会请他确认，完全访问模式除外），不要绕道登记。',
+    '6. **中间产物要显式登记**：任务里你自己产生的临时脚本/中间数据/调试日志，确认没用后调 mark_temp_files 登记，任务正常结束时系统会把它们移入回收站。**不登记就绝不会被自动清理**——所以登记是"要不要留"的唯一表态：用户要求保留或交付的文件（报告、成品、他让你建的文件）一律不许登记；拿不准就不登记（留着不亏，登记错了才是真损失）。**成果类后缀（.md/.html/.pdf/.png 等）即使误登记了系统也不会清**，只会原样保留并如实汇报。用户的文件要删时另走 delete_file（每次都会请他确认，完全访问模式除外），不要绕道登记。',
     '7. **两条识图路各有分工，打架时要说出来**：要看懂图的版面与语义（这是什么、讲了什么）用 describe_image；要**精确逐字**（数字、金额、编号、代码、表格单元格）用 ocr_image（本机识别、不联网）。**同一张图两条路给出的关键数字不一致时，必须把两个结果都摆出来、点明冲突，让用户核对原图裁定**——不许自己挑一个当事实。图里的文字/数字永远标注"根据图片识别"，关键信息提醒用户核对。'
   ].join('\n')
 }
@@ -211,7 +226,8 @@ export function buildPlanAppendix(): string {
   ].join('\n')
 }
 
-/** 组装系统提示词：soul → style → 运行时附录（→ 学习守则）（顺序固定，契约） */
+/** 组装系统提示词：soul → style → 运行时附录（→ 模式守则）→ **思考语言（恒为最后一段）**。
+ * 顺序固定是契约；思考语言压轴是刻意的（近因效应，见 buildThinkingLanguageAppendix 注释）。 */
 export function buildSystemPrompt(persona: PersonaFiles, ctx: PromptContext = {}): string {
   const sections = [persona.soul.trim(), persona.style.trim(), buildRuntimeAppendix(ctx)]
   // 长期记忆附录：有命中条目才追加（开关关闭/零命中时调用方传 undefined）
@@ -221,5 +237,6 @@ export function buildSystemPrompt(persona: PersonaFiles, ctx: PromptContext = {}
   if (ctx.toolMode === true) sections.push(buildWorkflowAppendix())
   if (ctx.learnMode === true) sections.push(buildLearnAppendix())
   if (ctx.planMode === true) sections.push(buildPlanAppendix())
+  sections.push(buildThinkingLanguageAppendix())
   return sections.join(PROMPT_SEPARATOR)
 }

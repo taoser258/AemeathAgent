@@ -40,7 +40,6 @@ function ReasoningSlider({
   levels,
   value,
   onChange,
-  hintOf,
   model
 }: {
   /** 可选档位（按强度升序；来自档案 reasoningLevels，至少一个） */
@@ -48,8 +47,6 @@ function ReasoningSlider({
   /** 当前档位；不在 levels 里时回退首项 */
   value: ReasoningEffort | undefined
   onChange: (level: ReasoningEffort) => void
-  /** 附加说明（如预算 tokens），跟在「模型名 · 档位」之后；缺省不占位 */
-  hintOf?: (level: ReasoningEffort) => string
   /** 当前模型名（与当前档位组成一行，如「qwen3.8-flash · 极致」）；空模型只显示档位 */
   model?: string
 }): React.JSX.Element {
@@ -67,7 +64,6 @@ function ReasoningSlider({
   const current = levels[idx]
   // 'default' 这一档说全「自动（不注入）」，否则用户分不清"自动"与"低"。
   const label = current === 'default' ? '自动（不注入）' : REASONING_LABELS[current]
-  const hint = hintOf !== undefined ? hintOf(current) : ''
 
   const [dragging, setDragging] = useState(false)
   /** 松手/点选后圆钮正在弹簧吸附：此期间开过渡，落定即关（拖动中必须无过渡才跟手） */
@@ -83,8 +79,6 @@ function ReasoningSlider({
   const displayLevel = levels[displayIdx] ?? current
   const displayLabel =
     displayLevel === 'default' ? '自动（不注入）' : (REASONING_LABELS[displayLevel] ?? label)
-  const displayHint =
-    hintOf !== undefined && displayLevel !== undefined ? hintOf(displayLevel) : hint
 
   const snapTimer = useRef<number | undefined>(undefined)
   const pendingBurst = useRef(false) // 弹簧落定后再爆珠（在档上松手则立即爆）
@@ -434,7 +428,6 @@ function ReasoningSlider({
       <div className={`rslider-caption${displayPeak ? ' peak' : ''}`}>
         {modelName !== '' ? <span className="rslider-cap-model">{modelName}</span> : null}
         <span className="rslider-cap-name">{displayLabel}</span>
-        {displayHint ? <span className="rslider-cap-hint">{displayHint}</span> : null}
       </div>
 
       <div

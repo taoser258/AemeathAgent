@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  appendNotice,
   appendToken,
   deriveTitle,
   finalize,
@@ -351,6 +352,39 @@ describe('groupPersistedIntoTurns（历史按回合合并：同轮不被切成�
     expect(out.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
     expect(out[1].content).toBe('回一')
     expect(out[3].content).toBe('回二')
+  })
+
+  it('★ 系统通知（notice）独立成一条，不并进助手气泡也不吃掉回合', () => {
+    const out = groupPersistedIntoTurns([
+      pmsg({ id: 'u1', role: 'user', text: '做个页面' }),
+      pmsg({ id: 'a1', role: 'assistant', text: '做好了' }),
+      pmsg({
+        id: 'n1',
+        role: 'notice',
+        text: '任务结束，已把 1 个中间产物移入回收站（可还原）：_preview-server.js。'
+      })
+    ])
+    expect(out.map((m) => m.role)).toEqual(['user', 'assistant', 'notice'])
+    expect(out[2].id).toBe('n1')
+    expect(out[2].content).toContain('移入回收站')
+    // 通知之后若还有一轮对话，必须新起一条气泡（不能被并进上一轮的助手气泡）
+    const withNext = groupPersistedIntoTurns([
+      pmsg({ id: 'a1', role: 'assistant', text: '做好了' }),
+      pmsg({ id: 'n1', role: 'notice', text: '任务结束，已清理 1 个中间产物。' }),
+      pmsg({ id: 'u2', role: 'user', text: '再来一个' }),
+      pmsg({ id: 'a2', role: 'assistant', text: '好' })
+    ])
+    expect(withNext.map((m) => m.role)).toEqual(['assistant', 'notice', 'user', 'assistant'])
+  })
+
+  it('★ appendNotice：并进列表；同 id 再来一次不重复（本地显示 ↔ 盘上恢复同一条）', () => {
+    const base: ChatMessage[] = [{ id: 'a1', role: 'assistant', content: '做好了', ts: 1 }]
+    const once = appendNotice(base, { id: 'n1', text: '任务结束，已清理 1 个中间产物。', ts: 2 })
+    expect(once.map((m) => m.role)).toEqual(['assistant', 'notice'])
+    expect(once[1].content).toContain('已清理')
+    // 主进程落盘后从盘上恢复时同 id 再来一次 → 原数组原样返回（引用不变 = 不触发重渲染）
+    const again = appendNotice(once, { id: 'n1', text: '任务结束，已清理 1 个中间产物。', ts: 2 })
+    expect(again).toBe(once)
   })
 
   it('未执行完的调用（无 tool 结果）→ ok=false，不误报成功', () => {

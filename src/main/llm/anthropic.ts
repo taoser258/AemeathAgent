@@ -1,4 +1,4 @@
-﻿// Anthropic Messages API 适配：openai 形态的 ChatTurn[]/LlmTool ↔ Anthropic
+// Anthropic Messages API 适配：openai 形态的 ChatTurn[]/LlmTool ↔ Anthropic
 // messages/tools 的双向转换 + 原生 fetch SSE 流式解析。
 // 为什么手写而不装 @anthropic-ai/sdk：本阶段唯一解禁依赖是 MCP SDK，
 // Anthropic 走原生 fetch + 自研 SSE 行解析（协议稳定，代码可控）。
@@ -159,7 +159,13 @@ export class AnthropicStreamAggregator {
   /** 喂一条 SSE 事件（data: 后的 JSON 对象）；返回是否为文本/思考增量（供 TTFT/转发判定） */
   feed(event: {
     type: string
-    message?: { usage?: { input_tokens?: number; cache_read_input_tokens?: number } }
+    message?: {
+      usage?: {
+        input_tokens?: number
+        cache_read_input_tokens?: number
+        cache_creation_input_tokens?: number
+      }
+    }
     content_block?: { type: string; id?: string; name?: string }
     index?: number
     delta?: {
@@ -179,11 +185,24 @@ export class AnthropicStreamAggregator {
       case 'message_start': {
         const u = event.message?.usage
         if (u !== undefined) {
+          // ★ Anthropic 的输入口径与其他协议**不同**：`input_tokens` 是"没走缓存的那部分"，
+          //   缓存命中（cache_read）与缓存写入（cache_creation）各报一个独立字段。
+          //   此前只取 input_tokens 当 promptTokens，后果是一连串低报：
+          //   · 上下文环 + 监测栏「输入 tok」按 548 显示（真实 16 万级）；
+          //   · P8 压缩的触发阈值拿的是这个值 → 带缓存的端点上**永远不会触发压缩**；
+          //   · 缓存命中率算成 cached/input = 663%（分子含缓存、分母不含）。
+          //   统一改成三者和，与其他协议（prompt_tokens 本身含缓存）语义对齐。
           const input = u.input_tokens ?? 0
-          const cached = u.cache_read_input_tokens
-          this.usage = { promptTokens: input, completionTokens: 0, totalTokens: input }
-          if (typeof cached === 'number') {
-            this.cachedTokens = cached
+          const cachedRead = u.cache_read_input_tokens ?? 0
+          const cacheCreated = u.cache_creation_input_tokens ?? 0
+          const promptTotal = input + cachedRead + cacheCreated
+          this.usage = {
+            promptTokens: promptTotal,
+            completionTokens: 0,
+            totalTokens: promptTotal
+          }
+          if (typeof u.cache_read_input_tokens === 'number') {
+            this.cachedTokens = u.cache_read_input_tokens
             this.cacheKnown = true
           }
         }

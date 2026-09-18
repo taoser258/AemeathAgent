@@ -37,7 +37,9 @@ const KNOWN_PREFIXES = [
   // 终端 v2
   'terminal:',
   // 自动更新
-  'update:'
+  'update:',
+  // 提示词优化（改写输入框原文）
+  'prompt:'
 ]
 
 function channelEntries(): Array<[string, string]> {

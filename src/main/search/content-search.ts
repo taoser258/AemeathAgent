@@ -45,9 +45,37 @@ const IGNORE_DIRS = new Set([
 ])
 
 const TEXT_EXT = new Set([
-  '.md', '.txt', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.html', '.htm',
-  '.css', '.scss', '.less', '.vue', '.py', '.go', '.rs', '.java', '.c', '.h', '.cpp',
-  '.sh', '.yml', '.yaml', '.toml', '.ini', '.cfg', '.sql', '.svg', '.xml'
+  '.md',
+  '.txt',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.html',
+  '.htm',
+  '.css',
+  '.scss',
+  '.less',
+  '.vue',
+  '.py',
+  '.go',
+  '.rs',
+  '.java',
+  '.c',
+  '.h',
+  '.cpp',
+  '.sh',
+  '.yml',
+  '.yaml',
+  '.toml',
+  '.ini',
+  '.cfg',
+  '.sql',
+  '.svg',
+  '.xml'
 ])
 
 const MAX_FILES = 3000
@@ -55,12 +83,7 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024
 const SNIPPET_MAX = 200
 
 /** 单文件逐行匹配：返回命中行（全词命中行排前） */
-function matchFile(
-  abs: string,
-  rel: string,
-  name: string,
-  terms: string[]
-): ContentHit[] {
+function matchFile(abs: string, rel: string, name: string, terms: string[]): ContentHit[] {
   let text: string
   try {
     const st = statSync(abs)

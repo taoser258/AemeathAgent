@@ -11,7 +11,6 @@ import {
   clampLevelForProtocol,
   planReasoning,
   protocolMaxLevel,
-  reasoningDetail,
   reasoningSummary
 } from '../src/shared/reasoning'
 import { buildGeminiBody } from '../src/main/llm/gemini'
@@ -142,16 +141,12 @@ describe('reasoning · 三协议映射表', () => {
     expect(planReasoning({ protocol: 'openai', maxOutput: Number.NaN }).maxTokens).toBeUndefined()
   })
 
-  it('展示文案：带预算的档位把 tokens 也说出来；detail 只给 tokens 部分（防重复拼接）', () => {
+  it('展示文案：带预算的档位把 tokens 也说出来（设置页/提示用）', () => {
     expect(reasoningSummary(planReasoning({ protocol: 'anthropic', effort: 'high' }))).toContain(
       '20,480'
     )
     expect(reasoningSummary(planReasoning({ protocol: 'openai', effort: 'low' }))).toBe('低')
     expect(reasoningSummary(planReasoning({ protocol: 'openai' }))).toContain('不注入')
-    // 滑条浮出 = 档位名 + detail：detail 里不能再带档位名（实测踩过「中 · 中 · 10,240 tokens」）
-    const anthropic = planReasoning({ protocol: 'anthropic', effort: 'medium' })
-    expect(reasoningDetail(anthropic)).toBe('10,240 tokens')
-    expect(reasoningDetail(planReasoning({ protocol: 'openai', effort: 'medium' }))).toBe('')
   })
 })
 

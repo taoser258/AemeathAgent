@@ -231,6 +231,31 @@ function startResize(event: React.PointerEvent<HTMLDivElement>, edge: ResizeEdge
   window.addEventListener('pointerup', onUp)
 }
 
+/** 空会话开场白：三种模式各说各的（同一版式——首词加粗，只换主句）。
+ * 对话模式是闲聊邀约；工作模式强调"听差 + 我来动手"（该模式真有工具与工作区）；
+ * 学习模式按 learnMode 的教学人设开课（人格附录里她就是老师，三段式辅导）。 */
+function welcomeLine(mode: 'chat' | 'work' | 'learn'): React.ReactNode {
+  if (mode === 'work') {
+    return (
+      <>
+        <b>爱弥斯</b>已就位，今天要办什么？交给我吧。
+      </>
+    )
+  }
+  if (mode === 'learn') {
+    return (
+      <>
+        <b>爱弥斯</b>开课啦，今天想弄懂什么？
+      </>
+    )
+  }
+  return (
+    <>
+      <b>爱弥斯</b>已上线，要来聊会天吗？
+    </>
+  )
+}
+
 function ChatPage(): React.JSX.Element {
   const loaded = useChatStore((s) => s.loaded)
   const hasSession = useChatStore((s) => s.sessions.some((s) => s.hidden !== true))
@@ -421,9 +446,7 @@ function ChatPage(): React.JSX.Element {
                   />
                   {/* 模式徽标随胶囊联动：chat / work / learn */}
                   <span className="chat-welcome-badge">{chatMode}</span>
-                  <div className="chat-welcome-line">
-                    <b>爱弥斯</b>已上线，要来聊会天吗？
-                  </div>
+                  <div className="chat-welcome-line">{welcomeLine(chatMode)}</div>
                 </div>
                 <ChatInput />
               </div>

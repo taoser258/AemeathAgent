@@ -657,6 +657,7 @@ const markTempFilesTool: ToolDef = {
     '登记本轮你自己产生的中间产物（临时脚本、中间数据、调试日志等），任务正常结束后系统会把它们移入回收站。' +
     '**只登记你确认没用的中间文件**：用户要求保留或交付的文件（报告、成品、他让你建的文件）一律不许登记；' +
     '用户已有的文件也不登记（系统只清理你本轮新建的）。不确定就不登记——不登记只是留着，登记错了才是真损失。' +
+    '成果类后缀（.md/.html/.pdf/.png 等）即使误登记了也不会被清，只会原样保留并汇报。' +
     '可一次登记多个；登记后照常在回复里说明你清理了哪些。',
   parameters: {
     type: 'object',
@@ -747,10 +748,7 @@ const todoWriteTool: ToolDef = {
   execute: async (args, ctx) => {
     const items = args.items
     // 宽容归一：status 别名 / 字符串条目 / 超限都自动折算，不再整表拒
-    const { state, dropped, coerced } = writeTodos(
-      ctx.sessionId,
-      Array.isArray(items) ? items : []
-    )
+    const { state, dropped, coerced } = writeTodos(ctx.sessionId, Array.isArray(items) ? items : [])
     const done = state.items.filter((i) => i.status === 'done').length
     const notes: string[] = []
     if (coerced > 0) notes.push(`${coerced} 项的 status 认不出，已按「未完成」记`)

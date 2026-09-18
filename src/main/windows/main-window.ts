@@ -61,14 +61,16 @@ export function createMainWindow(): BrowserWindow {
 
   window.on('ready-to-show', () => {
     window.show()
-    // 冷启动 / 桌宠菜单「重启应用」后：主窗强制压到所有窗口最上方，2 秒后释放
-    // （直接 setAlwaysOnTop(false) 会让别的窗口插进来，先置顶再定时归还焦点层级）
-    window.setAlwaysOnTop(true, 'screen-saver')
+    // 冷启动 / 桌宠菜单「重启应用」后：把主窗提到「普通窗口层」的最前 + 拿焦点。
+    //
+    // ★ 旧实现是 setAlwaysOnTop(true, 'screen-saver') 再 2 秒后 setAlwaysOnTop(false)
+    //   释放。实测（owner 报告 + 复现）：**释放后 Z 序没有真正降回桌宠之下**——
+    //   桌宠（topmost）被主窗（非 topmost）压住，之后无论 setAlwaysOnTop(true) 还是
+    //   Win32 SetWindowPos(HWND_TOPMOST) 都压不回来，只有 hide/show 主窗触发 Z 序
+    //   重排才恢复。moveTop() 等价 SetWindowPos(HWND_TOP)：只在自身层级内提升，
+    //   不会越到置顶的桌宠之上——桌宠恒定可见（这正是桌宠该有的行为）。
+    window.moveTop()
     window.focus()
-    const releaseTopmost = setTimeout(() => {
-      if (!window.isDestroyed()) window.setAlwaysOnTop(false)
-    }, 2000)
-    window.once('closed', () => clearTimeout(releaseTopmost))
   })
 
   // 关闭 = 隐藏：会话与输入内容不销毁，重开秒回
@@ -78,6 +80,9 @@ export function createMainWindow(): BrowserWindow {
       window.hide()
     }
   })
+
+  // 主窗最小化挂钩不在这：由 pet/bubble-scheduler 的 attachMainWindowHooks 显式
+  // 附着（避免 main-window ↔ bubble-scheduler 循环依赖）。
 
   // 渲染进程崩溃自恢复：
   // 崩溃记 debug 日志（与人为关窗可区分），自动 reload 一次；连续崩溃不循环重载（防崩溃风暴）
@@ -262,7 +267,10 @@ export function createSettingsWindow(): BrowserWindow {
  * setBounds——同步、精确、跨 DPI 稳。状态经 win:window-maximized 广播给渲染层
  * （图标切还原态、拖拽/缩放分支读它）。
  */
-const manualMaximized = new WeakMap<BrowserWindow, { x: number; y: number; width: number; height: number }>()
+const manualMaximized = new WeakMap<
+  BrowserWindow,
+  { x: number; y: number; width: number; height: number }
+>()
 
 function isManualMaximized(win: BrowserWindow): boolean {
   return manualMaximized.has(win)

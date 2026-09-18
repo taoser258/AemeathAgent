@@ -51,7 +51,8 @@ function sanitizeMessage(raw: unknown): PersistedMessage | null {
   if (typeof raw !== 'object' || raw === null) return null
   const r = raw as Record<string, unknown>
   if (typeof r.id !== 'string' || r.id === '') return null
-  if (r.role !== 'user' && r.role !== 'assistant' && r.role !== 'tool') return null
+  if (r.role !== 'user' && r.role !== 'assistant' && r.role !== 'tool' && r.role !== 'notice')
+    return null
   if (typeof r.ts !== 'number' || !Number.isFinite(r.ts)) return null
   if (typeof r.text !== 'string') return null
   const msg: PersistedMessage = { id: r.id, role: r.role, ts: r.ts, text: r.text }

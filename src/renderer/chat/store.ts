@@ -145,6 +145,17 @@ function withTimeline(
   return list.map((m) => (m.id === messageId ? { ...m, timeline: fn(m.timeline ?? []) } : m))
 }
 
+/** 把一条系统通知并进消息列表（纯函数，可单测）。
+ * 同 id 已存在则原样返回——主进程落盘的通报与本地的即时显示是同一条，
+ * 从盘上恢复后不会出现两条一样的通报。 */
+export function appendNotice(
+  list: ChatMessage[],
+  notice: { id: string; text: string; ts: number }
+): ChatMessage[] {
+  if (list.some((m) => m.id === notice.id)) return list
+  return [...list, { id: notice.id, role: 'notice', content: notice.text, ts: notice.ts }]
+}
+
 /** 持久化消息 → 渲染消息（**纯函数，可单测**）。
  *
  * 按「回合」合并：一轮 = 一条 user 之后的所有
@@ -190,6 +201,13 @@ export function groupPersistedIntoTurns(
       continue
     }
     if (m.role === 'tool') continue // 结果已进 toolResults（随调用段一起渲染）
+    // 系统通知（任务收尾的清理结果）：独立成一行，不并进助手气泡——
+    // 它不是她"说的话"，是系统对用户的通报（纯展示，不参与对话）
+    if (m.role === 'notice') {
+      flush()
+      out.push({ id: m.id, role: 'notice', content: m.text, ts: m.ts })
+      continue
+    }
     // assistant：并入当前回合（回合内多条 = 各步）
     if (turn === null) {
       turn = { id: m.id, role: 'assistant', content: '', ts: m.ts, timeline: [], toolRuns: [] }
@@ -1200,11 +1218,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }))
       } else if (ev.type === 'run_notice' && typeof ev.data === 'object' && ev.data !== null) {
-        // 引擎侧状态（自动续跑 / 连接重试）：流式气泡下显示一行淡色说明
+        // 引擎侧状态（自动续跑 / 连接重试 / 压缩中）：流式气泡下显示一行淡色说明
         const notice = ev.data as RunNoticeData
-        set((state) => ({
-          noticeBySession: { ...state.noticeBySession, [sessionId]: notice }
-        }))
+        const cleanupId = notice.messageId
+        if (cleanupId !== undefined) {
+          // 收尾通报（清理结果 / 核对提醒）是**事实通报**，且主进程已把它落盘：
+          // 直接作为一条 notice 消息进消息流，而不是只挂在流式气泡下的临时提示——
+          // 刷新/重进会话后它还在（此前会消失）。
+          // 与落盘那条同 id → 之后从盘上恢复时不会出现两条一样的通报。
+          set((state) => ({
+            messagesBySession: {
+              ...state.messagesBySession,
+              [sessionId]: appendNotice(state.messagesBySession[sessionId] ?? [], {
+                id: cleanupId,
+                text: notice.text,
+                ts: Date.now()
+              })
+            }
+          }))
+        } else {
+          set((state) => ({
+            noticeBySession: { ...state.noticeBySession, [sessionId]: notice }
+          }))
+        }
       } else if (
         ev.type === 'tool_approval_request' &&
         typeof ev.data === 'object' &&

@@ -15,9 +15,16 @@ export interface WindowSize {
   height: number
 }
 
-/** 桌宠窗尺寸：立绘 260 宽（源图 960x917）+ 头顶约 56px 气泡空间 */
-export const PET_WINDOW_WIDTH = 260
+/**
+ * 桌宠窗尺寸（P9-T5 起加宽）：
+ * 立绘 260 宽（源图 960x917，PET_ART_WIDTH）居中放在 400 宽的透明窗里，
+ * 两侧各 70 DIP 透明区，气泡由此可以溢出立绘宽度而不顶到窗口边。
+ * 高度仍是 260 立绘 + 头顶约 56px 气泡空间。
+ */
+export const PET_WINDOW_WIDTH = 400
 export const PET_WINDOW_HEIGHT = 316
+/** 立绘在窗内的逻辑宽度（渲染层按它钉死，不随窗宽走） */
+export const PET_ART_WIDTH = 260
 
 /** 滑动调节的倍率范围（右键菜单 → 调整大小） */
 export const PET_SCALE_MIN = 0.5

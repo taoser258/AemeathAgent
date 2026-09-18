@@ -57,6 +57,49 @@ describe('settings/app-config', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('宽窗迁移（P9-T5）：旧 x 左移半窗差一次，layoutV2 置真', () => {
+    // scale 0.5：半窗差 (400-260)/2*0.5 = 35
+    const merged = mergeAppConfig({ pet: { x: 1000, y: 500, scale: 0.5 } })
+    expect(merged.pet.x).toBe(965)
+    expect(merged.pet.layoutV2).toBe(true)
+    // scale 1：半窗差 70
+    const big = mergeAppConfig({ pet: { x: 1000, scale: 1 } })
+    expect(big.pet.x).toBe(930)
+    // x 为 null：保持 null（首次运行走右下回退）
+    expect(mergeAppConfig({ pet: { scale: 0.5 } }).pet.x).toBeNull()
+  })
+
+  it('宽窗迁移只做一次：layoutV2=true 后 x 不再移动', () => {
+    const merged = mergeAppConfig({
+      pet: { x: 1000, y: 500, scale: 0.5, layoutV2: true }
+    })
+    expect(merged.pet.x).toBe(1000)
+  })
+
+  it('气泡设置补丁：档位/时段/空闲分钟经防御后持久化', () => {
+    const base = mergeAppConfig({})
+    // 档位合法值落盘；脏值不动
+    let next = applySettingsPatch(base, { pet: { bubbleLevel: 'off' } })
+    expect(next.pet.bubbleLevel).toBe('off')
+    next = applySettingsPatch(base, { pet: { bubbleLevel: 'weird' as never } })
+    expect(next.pet.bubbleLevel).toBe(base.pet.bubbleLevel)
+    // 时段：合法落盘，非法回退当前值
+    next = applySettingsPatch(base, { pet: { bubbleDndStart: '22:00' } })
+    expect(next.pet.bubbleDndStart).toBe('22:00')
+    next = applySettingsPatch(base, { pet: { bubbleDndEnd: '99:99' } })
+    expect(next.pet.bubbleDndEnd).toBe(base.pet.bubbleDndEnd)
+    // 空闲：0 与 5–240 落盘；脏值不动
+    next = applySettingsPatch(base, { pet: { bubbleIdleMin: 0 } })
+    expect(next.pet.bubbleIdleMin).toBe(0)
+    next = applySettingsPatch(base, { pet: { bubbleIdleMin: 60 } })
+    expect(next.pet.bubbleIdleMin).toBe(60)
+    next = applySettingsPatch(base, { pet: { bubbleIdleMin: 999 } })
+    expect(next.pet.bubbleIdleMin).toBe(base.pet.bubbleIdleMin)
+    // 补丁不可夹带位置/穿透字段（类型外字段无效）
+    next = applySettingsPatch(base, { pet: { clickThrough: true } } as never)
+    expect(next.pet.clickThrough).toBe(base.pet.clickThrough)
+  })
+
   it('工具可见性：缺省全 all；数组去重保留；脏值/空数组回退 all（防自锁）', () => {
     const merged = mergeAppConfig({
       tools: { visibility: { work: ['current_time', 'read_file', 'read_file'], learn: 'all' } }

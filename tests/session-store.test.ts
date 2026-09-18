@@ -123,12 +123,14 @@ describe('session-store', () => {
           { id: 'm-1', role: 'user', ts: 1, text: '好的' },
           { id: 'm-2', role: 'system', ts: 2, text: '不该出现的角色' },
           { id: 'm-3', ts: 3, text: '缺 role' },
-          { id: 'm-4', role: 'assistant', ts: 4, text: '正常回复' }
+          { id: 'm-4', role: 'assistant', ts: 4, text: '正常回复' },
+          // notice 是合法的持久化角色（系统通报落盘，回看可见）
+          { id: 'm-5', role: 'notice', ts: 5, text: '已把 1 个中间产物移入回收站' }
         ]
       })
     )
     const loaded = loadSessionMessages(dir, 's-mixed')
-    expect(loaded.ok && loaded.messages.map((m) => m.id)).toEqual(['m-1', 'm-4'])
+    expect(loaded.ok && loaded.messages.map((m) => m.id)).toEqual(['m-1', 'm-4', 'm-5'])
   })
 
   it('删除会话：数据文件与损坏备份一并清理', () => {

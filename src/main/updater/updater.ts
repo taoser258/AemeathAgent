@@ -2,9 +2,11 @@
  * 自动更新。
  *
  * 现实约束（评估结论）：
- * · 仓库是 GitHub 私有库且本机无 gh/PAT —— GitHub Releases 渠道要等「仓库公开
- * 或配置 token」才真正可用；代码按标准 github provider 写（publish 配置在
- * package.json build），渠道条件成熟即插即用，不用改代码。
+ * · 渠道 = 发布库 taoser258/AemeathAgent（public）的 GitHub Releases，publish 配置
+ *   写在 package.json 的 build 段（github provider），代码侧无需改动。
+ *   2026-09-17 实测：v0.3.1 打包版 updateCheck() 由 not-available → available
+ *   0.3.2-alpha，链路通。（此前注释里"仓库是私有库、本机无 gh/PAT，渠道要等条件
+ *   成熟"的顾虑已随仓库公开作废。）
  * · 「失败静默降级不弹窗骚扰」：启动后延迟自动检查一次，任何失败
  * （404/断网/无 latest.yml）只记状态、不弹任何窗；「检查更新」按钮在关于页，
  * 用户主动触发才有反馈。
@@ -23,7 +25,8 @@ import {
   UPDATE_DOWNLOAD,
   UPDATE_OPEN_RELEASES,
   UPDATE_QUIT_INSTALL,
-  UPDATE_STATUS
+  UPDATE_STATUS,
+  UPDATE_STATUS_GET
 } from '@shared/ipc-channels'
 import type { UpdateStatus } from '@shared/types'
 
@@ -78,6 +81,10 @@ export function registerUpdaterIpc(): void {
   autoUpdater.on('update-downloaded', (info) =>
     setStatus({ state: 'downloaded', version: info.version })
   )
+
+  // 只读对账：渲染层挂载时问一次当前状态（主窗设置入口的「有新版本」角标靠它），
+  // 这里**不做任何网络检查**——真正的检查只有启动后那一次和关于页用户主动点。
+  ipcMain.handle(UPDATE_STATUS_GET, (): UpdateStatus => lastStatus)
 
   ipcMain.handle(UPDATE_CHECK, async (): Promise<UpdateStatus> => {
     if (!app.isPackaged) {

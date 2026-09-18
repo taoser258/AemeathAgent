@@ -94,7 +94,8 @@ export function registerSettingsIpc(): void {
         personaPromptChars = buildSystemPrompt(persona, {
           now: new Date(),
           // 与真实发送（chat/run.ts）保持一致：用户信息也计入上下文占用估算
-          user: { nickname: config.user.nickname, about: config.user.about }
+          user: { nickname: config.user.nickname, about: config.user.about },
+          bubbleLevel: config.pet.bubbleLevel
         }).length
       }
     } catch {

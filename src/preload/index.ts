@@ -32,6 +32,9 @@ import {
   DIALOG_PICK_FILES,
   DIALOG_PICK_DIRECTORY,
   PET_BUBBLE,
+  PET_DRAGGED,
+  PET_TAP,
+  WIN_OPEN_MAIN,
   SESSION_DELETE,
   SESSION_LIST,
   SESSION_TOKEN_USAGE,
@@ -74,6 +77,8 @@ import {
   UPDATE_QUIT_INSTALL,
   UPDATE_OPEN_RELEASES,
   UPDATE_STATUS,
+  PROMPT_OPTIMIZE,
+  UPDATE_STATUS_GET,
   STICKER_LIST,
   WIN_WINDOW_SET_BOUNDS,
   WIN_WINDOW_MOVE_TO,
@@ -137,6 +142,8 @@ const petAPI = {
 
   /** 自动更新：检查 / 下载 / 重启安装 / 打开 Releases + 状态订阅 */
   updateCheck: (): Promise<UpdateStatus> => ipcRenderer.invoke(UPDATE_CHECK),
+  /** 只读当前更新状态（不触发网络检查）——主窗设置入口的「有新版本」角标对账用 */
+  updateStatusGet: (): Promise<UpdateStatus> => ipcRenderer.invoke(UPDATE_STATUS_GET),
   updateDownload: (): Promise<UpdateStatus> => ipcRenderer.invoke(UPDATE_DOWNLOAD),
   updateQuitInstall: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(UPDATE_QUIT_INSTALL),
   updateOpenReleases: (): Promise<{ ok: boolean }> => ipcRenderer.invoke(UPDATE_OPEN_RELEASES),
@@ -147,6 +154,13 @@ const petAPI = {
       ipcRenderer.removeListener(UPDATE_STATUS, listener)
     }
   },
+
+  /** 提示词优化（P9-T4）：把输入框原文改写成更清楚的版本（不带历史、不自动发送） */
+  promptOptimize: (
+    text: string,
+    mode: 'chat' | 'work' | 'learn'
+  ): Promise<{ ok: true; text: string } | { ok: false; error: string }> =>
+    ipcRenderer.invoke(PROMPT_OPTIMIZE, { text, mode }),
 
   /** 发送一条聊天消息（可带附件）；runId 随后经 onChatStream 关联流式事件 */
   chatSend: (
@@ -527,6 +541,19 @@ const petAPI = {
     return () => {
       ipcRenderer.removeListener(PET_BUBBLE, listener)
     }
+  },
+
+  /** 桌宠被点了一下（P9-T5：tap 与 drag 在渲染层区分后上报） */
+  petTap: (): void => {
+    ipcRenderer.send(PET_TAP)
+  },
+  /** 桌宠被拖动了一段 */
+  petDragged: (): void => {
+    ipcRenderer.send(PET_DRAGGED)
+  },
+  /** 打开主窗（点气泡入口） */
+  openMainWindow: (): void => {
+    ipcRenderer.send(WIN_OPEN_MAIN)
   }
 }
 

@@ -55,7 +55,11 @@ export function classifyLlmError(err: unknown): LlmErrorInfo {
   if (status === 400) {
     // 内容审核拦截（国内厂商普遍形态：千问/豆包 data_inspection_failed、
     // 智谱 sensitive 类）——重试没有意义，要的是"改措辞/删附件内容"的行动指引。
-    if (/data_inspection_failed|inappropriate content|content_policy|content filter|sensitive|prohibited/i.test(raw)) {
+    if (
+      /data_inspection_failed|inappropriate content|content_policy|content filter|sensitive|prohibited/i.test(
+        raw
+      )
+    ) {
       return {
         kind: 'content',
         message:

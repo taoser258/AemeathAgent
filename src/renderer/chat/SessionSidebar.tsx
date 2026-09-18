@@ -5,7 +5,8 @@
 // 宽度由 ChatPage 注入（拖 .sidebar-resizer 调整，localStorage 记忆）。
 
 import { useEffect, useState } from 'react'
-import type { AppConfig } from '@shared/types'
+import type { AppConfig, UpdateStatus } from '@shared/types'
+import { updateBadge } from '@shared/update-badge'
 import { groupSessionsByDate, useChatStore } from './store'
 
 export type SidePanel = 'tools' | 'skills'
@@ -30,6 +31,9 @@ function SessionSidebar({
   const sessions = useChatStore((s) => s.sessions)
   const activeId = useChatStore((s) => s.activeId)
   const chatMode = useChatStore((s) => s.chatMode)
+  // 在途 run 的会话 id 列表（多会话并行：A 会话跑着不影响 B 会话发送）。
+  // 按列表整存订阅即可——它只在 run 起止时换引用，不随流式 token 变化。
+  const runningIds = useChatStore((s) => s.runningIds)
   const createSession = useChatStore((s) => s.createSession)
   const selectSession = useChatStore((s) => s.selectSession)
   const deleteSession = useChatStore((s) => s.deleteSession)
@@ -49,6 +53,16 @@ function SessionSidebar({
   }, [])
   // 默认称呼"漂泊者"与人设口径一致（soul.md 里用户即漂泊者）；用户填了自己的称呼就以其为准
   const displayName = user.nickname !== '' ? user.nickname : '漂泊者'
+
+  // 更新角标（轻提示）：新版本由主进程启动后自动查一次并广播；这里只负责显示。
+  // 挂载时先只读对账一次（不触发网络检查——否则每开一次主窗都白查一次），
+  // 之后靠 UPDATE_STATUS 广播（关于页手动检查、下载进度、下载完成都会推过来）。
+  const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' })
+  useEffect(() => {
+    void window.petAPI.updateStatusGet().then(setUpdate)
+    return window.petAPI.onUpdateStatus(setUpdate)
+  }, [])
+  const badge = updateBadge(update)
 
   // 内联重命名：双击/右键菜单进入编辑态；Enter/失焦提交，Esc 取消
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -129,6 +143,10 @@ function SessionSidebar({
                   />
                 ) : (
                   <>
+                    {/* 该会话正在生成：名字前挂一个转圈的加载环，切到别的会话也看得见它还在跑 */}
+                    {runningIds.includes(session.id) && (
+                      <span className="chat-session-spinner" aria-hidden="true" />
+                    )}
                     <span className="chat-session-title" title="双击或右键重命名">
                       {session.pinned === true ? '📌 ' : ''}
                       {session.title}
@@ -155,10 +173,16 @@ function SessionSidebar({
         <button
           type="button"
           className="chat-gear"
-          title="设置（独立窗口）"
+          title={badge.hint ?? '设置（独立窗口）'}
           onClick={() => window.petAPI.openSettings()}
         >
-          ⚙
+          ⚙{/* 角标只提示不代劳：点 ⚙ 进设置 → 关于 才有下载/安装按钮 */}
+          {badge.show && (
+            <span
+              className={badge.ready ? 'chat-gear-dot is-ready' : 'chat-gear-dot'}
+              aria-hidden="true"
+            />
+          )}
         </button>
       </div>
       {menu !== null ? (

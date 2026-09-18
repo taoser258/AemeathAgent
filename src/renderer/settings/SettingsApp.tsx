@@ -414,14 +414,34 @@ function MemorySection(): React.JSX.Element {
   )
 }
 
+/** 气泡档位的三个选项（设置页） */
+const BUBBLE_LEVEL_OPTIONS: Array<{ value: 'off' | 'greet' | 'all'; label: string; hint: string }> =
+  [
+    { value: 'off', label: '全关', hint: '头顶不冒泡' },
+    { value: 'greet', label: '只打招呼', hint: '启动 / 被点 / 被拖时应一声' },
+    { value: 'all', label: '主动提醒', hint: '再加空闲问候与任务完成/失败' }
+  ]
+
+/** 空闲分钟下拉选项（0 = 关） */
+const IDLE_MIN_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 240]
+
 function PetSection(): React.JSX.Element {
   const [clickThrough, setClickThrough] = useState<boolean | null>(null)
   const [screenAware, setScreenAware] = useState<boolean | null>(null)
+  // 气泡设置（P9-T5）；null = 还没从配置读到
+  const [bubbleLevel, setBubbleLevel] = useState<'off' | 'greet' | 'all' | null>(null)
+  const [dndStart, setDndStart] = useState('23:00')
+  const [dndEnd, setDndEnd] = useState('08:00')
+  const [idleMin, setIdleMin] = useState(30)
 
   useEffect(() => {
     window.petAPI.getConfig().then((config) => {
       setClickThrough(config.pet.clickThrough)
       setScreenAware(config.privacy?.activeWindow === true)
+      setBubbleLevel(config.pet.bubbleLevel)
+      setDndStart(config.pet.bubbleDndStart)
+      setDndEnd(config.pet.bubbleDndEnd)
+      setIdleMin(config.pet.bubbleIdleMin)
     })
   }, [])
 
@@ -438,6 +458,35 @@ function PetSection(): React.JSX.Element {
     } catch {
       setScreenAware(!next) // 失败回滚
     }
+  }
+
+  /** 气泡设置统一保存口：合并当前值提交；失败由调用处处理提示 */
+  const saveBubble = async (patch: {
+    bubbleLevel?: 'off' | 'greet' | 'all'
+    bubbleDndStart?: string
+    bubbleDndEnd?: string
+    bubbleIdleMin?: number
+  }): Promise<void> => {
+    await window.petAPI.settingsSet({ pet: patch })
+  }
+
+  const handleLevel = (level: 'off' | 'greet' | 'all'): void => {
+    setBubbleLevel(level) // 乐观更新
+    void saveBubble({ bubbleLevel: level }).catch(() =>
+      setBubbleLevel((cur) => (cur === level ? null : cur))
+    )
+  }
+
+  const handleDnd = (which: 'start' | 'end', value: string): void => {
+    if (which === 'start') setDndStart(value)
+    else setDndEnd(value)
+    // time 输入失焦/变更即保存；非法 HH:MM 主进程会防御性回退
+    void saveBubble(which === 'start' ? { bubbleDndStart: value } : { bubbleDndEnd: value })
+  }
+
+  const handleIdle = (value: number): void => {
+    setIdleMin(value)
+    void saveBubble({ bubbleIdleMin: value })
   }
 
   return (
@@ -471,6 +520,77 @@ function PetSection(): React.JSX.Element {
           找回桌宠
         </button>
       </div>
+      <div className="settings-card-head">
+        <span className="settings-card-icon">💬</span>
+        <div>
+          <div className="settings-card-title">头顶气泡</div>
+          <div className="settings-card-desc">
+            她什么时候会冒出来说句话。主动说话有冷却（4 分钟）和每小时上限（3 条）。
+          </div>
+        </div>
+      </div>
+      <div className="settings-row settings-row-block">
+        <span className="settings-row-label">冒泡档位</span>
+        <div className="bubble-level-pick" role="radiogroup">
+          {BUBBLE_LEVEL_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={bubbleLevel === opt.value}
+              title={opt.hint}
+              className={`bubble-level-opt${bubbleLevel === opt.value ? ' on' : ''}`}
+              onClick={() => handleLevel(opt.value)}
+              disabled={bubbleLevel === null}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="settings-row settings-row-block">
+        <span className="settings-row-label">
+          免打扰时段
+          <span className="settings-row-sub">
+            这期间不冒泡（复习到期提醒除外）；两端填相同等于不启用。
+          </span>
+        </span>
+        <div className="dnd-range">
+          <input
+            type="time"
+            className="settings-input-inline dnd-time"
+            aria-label="免打扰开始"
+            value={dndStart}
+            onChange={(e) => handleDnd('start', e.target.value)}
+          />
+          <span className="dnd-dash">—</span>
+          <input
+            type="time"
+            className="settings-input-inline dnd-time"
+            aria-label="免打扰结束"
+            value={dndEnd}
+            onChange={(e) => handleDnd('end', e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="settings-row">
+        <span className="settings-row-label">
+          空闲冒泡
+          <span className="settings-row-sub">多久没动静就冒一句（仅「主动提醒」档生效）。</span>
+        </span>
+        <select
+          className="settings-select dnd-select"
+          value={idleMin}
+          onChange={(e) => handleIdle(Number(e.target.value))}
+        >
+          {IDLE_MIN_OPTIONS.map((m) => (
+            <option key={m} value={m}>
+              {m === 0 ? '关闭' : `${m} 分钟`}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <p className="settings-hint">
         桌宠右键菜单里还有：打开主窗 / 隐藏桌宠 / 尺寸调节 / 回到右下角 / 退出。
       </p>

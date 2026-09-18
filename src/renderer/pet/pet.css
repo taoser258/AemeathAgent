@@ -6,8 +6,14 @@
    - 立绘阴影用 CSS filter: drop-shadow() 自绘（系统阴影对透明窗无效） */
 
 :root {
-  --pet-font-size: 13px;
+  --pet-font-size: 14px;
   --pet-radius: 10px;
+  /* 与主窗/设置窗同款界面字体（霞鹜文楷）：pet 页此前没引字体包，
+     气泡一直在回退雅黑（P9 反馈①）。字体包在 pet/main.tsx 引入。 */
+  --pet-font-body: 'LXGW WenKai Screen', 'Microsoft YaHei UI', 'Segoe UI', system-ui, sans-serif;
+  /* 气泡主色（对齐主窗 accent 粉）：描边 / 柔光 / hover 共用一套 */
+  --pet-bubble-line: rgba(255, 141, 186, 0.42);
+  --pet-bubble-glow: rgba(240, 103, 158, 0.2);
 }
 
 html,
@@ -34,39 +40,107 @@ body,
   cursor: grabbing;
 }
 
-.pet-art {
-  width: 100%;
+.pet-avatar-art {
+  /* 窗宽 400、立绘逻辑宽 260（P9-T5 加宽，见 pet-position.ts）→ 65%，
+     各缩放档位下立绘尺寸与旧版完全一致，只是窗内两侧多了透明区 */
+  width: 65%;
   display: block;
-  /* 桌宠周围全透明，不加任何阴影/光晕。
-     原 drop-shadow(0 6px 14px rgba(0, 0, 0, 0.28)) 在浅色壁纸上会显成一圈灰色光晕，已移除。 */
+  /* 呼吸微动（P9-T6）：以脚底为轴做极小幅缩放，像在轻轻呼吸。
+     幅度 1.6%、3.8 秒一周期——要"活着"但不能让人眼晕。 */
+  transform-origin: 50% 100%;
+  animation: pet-breathe 3.8s ease-in-out infinite;
+  /* 桌宠周围全透明，不加任何阴影/光晕（浅色壁纸下会显灰圈，已移除）。 */
 }
 
+@keyframes pet-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.016);
+  }
+}
+
+/* 尊重 prefers-reduced-motion：系统要求减少动态时停掉呼吸（@media 放顶层） */
+@media (prefers-reduced-motion: reduce) {
+  .pet-avatar-art {
+    animation: none;
+  }
+}
+
+/* 头顶气泡（P9-T5 通电 / 本次反馈①美化）：
+   白→极淡粉的竖向渐变 + 淡粉描边 + 粉色柔光，在壁纸上明显"浮"起来；
+   底部一枚指向她头顶的小尖角，读起来是"她在说话"而不是一块白牌。 */
 .pet-bubble {
   position: absolute;
   top: 6px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* 水平居中：left/right 都 0 + width:fit-content + margin:auto。
+     ★ 旧写法 left:50% + translateX(-50%) 有个隐蔽坑：absolute 元素 shrink-to-fit 的
+     "可用宽度" = 容器宽 − left，只剩右半窗（200→100 DIP），max-width:92% 从未生效——
+     "好，就这儿。" 5 个字被折成两行（实测：气泡宽度恒为 100 DIP）。 */
+  left: 0;
+  right: 0;
+  width: fit-content;
   max-width: 92%;
+  margin-inline: auto;
   box-sizing: border-box;
-  padding: 8px 12px;
-  border-radius: var(--pet-radius);
-  background: rgba(255, 255, 255, 0.94);
-  color: #443c4a;
-  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  padding: 9px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fff5f9 100%);
+  border: 1px solid var(--pet-bubble-line);
+  box-shadow:
+    0 6px 18px var(--pet-bubble-glow),
+    0 2px 5px rgba(68, 60, 74, 0.08);
+  color: #3d3346;
+  font-family: var(--pet-font-body);
   font-size: var(--pet-font-size);
-  line-height: 1.45;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
   word-break: break-word;
-  pointer-events: none; /* 气泡不挡拖拽 */
+  /* P9-T5：气泡是入口（点它开主窗），要接收指针；拖动等事件仍由 window 监听器处理 */
+  pointer-events: auto;
+  cursor: pointer;
   animation: pet-bubble-in 160ms ease-out;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease;
 }
 
+/* 指向她的尖角：旋转 45° 的小方块，只露右下两条描边 */
+.pet-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5.5px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  transform: rotate(45deg);
+  background: #fff5f9;
+  border-right: 1px solid var(--pet-bubble-line);
+  border-bottom: 1px solid var(--pet-bubble-line);
+  border-radius: 0 0 3px 0;
+}
+
+.pet-bubble:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #fff0f6 100%);
+  border-color: rgba(240, 103, 158, 0.62);
+  box-shadow:
+    0 8px 22px rgba(240, 103, 158, 0.26),
+    0 2px 5px rgba(68, 60, 74, 0.1);
+}
+
+/* 入场动画：只做纵向位移（水平居中已交给 margin:auto，不能再用 translateX） */
 @keyframes pet-bubble-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(-6px);
+    transform: translateY(-6px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }

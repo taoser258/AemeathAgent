@@ -75,6 +75,10 @@ describe('mcp/builtin · Playwright 配置构造', () => {
     expect(cfg.args[0]).toBe(REAL_CLI)
   })
 
+  it('★ cwd 也钉到产物目录：显式 filename 的截图按进程 CWD 解析，不能落进仓库/安装目录', () => {
+    expect(buildPlaywrightConfig(REAL_CLI, CTX).cwd).toBe(CTX.outputDir)
+  })
+
   it('默认启用（依赖随包分发 → 开箱可用）+ 命名空间固定为 browser + 超时放宽到 2 分钟', () => {
     const cfg = buildPlaywrightConfig(REAL_CLI, CTX)
     expect(cfg.enabled).toBe(true)
@@ -98,6 +102,15 @@ describe('mcp/builtin · 自愈式同步', () => {
     const r = ensureBuiltinServers([builtinServer()], [], CTX)
     expect(r.changed).toBe(false)
     expect(r.servers).toHaveLength(1)
+  })
+
+  it('★ 老配置缺 cwd（此前截图会落进应用目录）→ 自愈同步补上，不需用户手动改', () => {
+    const { cwd: _dropped, ...noCwd } = builtinServer()
+    const r = ensureBuiltinServers([noCwd as ReturnType<typeof builtinServer>], [], CTX)
+    expect(r.changed).toBe(true)
+    expect(r.servers[0].cwd).toBe(CTX.outputDir)
+    // 校正后必须收敛：再同步一次不该再判"过期"（否则每次启动都白写一次配置）
+    expect(ensureBuiltinServers(r.servers, [], CTX).changed).toBe(false)
   })
 
   it('★ 参数过期（应用升级后安装路径变化）→ 就地校正，但保留用户的开关与偏好', () => {

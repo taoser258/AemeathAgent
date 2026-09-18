@@ -37,6 +37,20 @@ describe('projectPersistedHistory（持久化 → LLM 投影）', () => {
     expect(turns[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: '15:00' })
   })
 
+  it('★ 系统通知（notice）绝不进 LLM 上下文：只在会话档案里给用户看', () => {
+    const turns = projectPersistedHistory([
+      msg({ role: 'user', text: '做个页面' }),
+      msg({ role: 'assistant', text: '做好了' }),
+      msg({
+        role: 'notice',
+        text: '任务结束，已把 1 个中间产物移入回收站（可还原）：_preview-server.js。'
+      })
+    ])
+    expect(turns).toHaveLength(2)
+    expect(turns.map((t) => t.role)).toEqual(['user', 'assistant'])
+    expect(JSON.stringify(turns)).not.toContain('回收站')
+  })
+
   it('悬空调用修补：assistant 有调用无结果（步数上限/中断）→ 自动补占位 tool 结果', () => {
     const turns = projectPersistedHistory([
       msg({

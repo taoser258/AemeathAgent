@@ -41,7 +41,17 @@ export const DEFAULT_APP_CONFIG: AppConfig = (() => {
       visionProfileId: ''
     },
     persona: { active: 'aemeath' },
-    pet: { x: null, y: null, clickThrough: false, scale: 0.5 },
+    pet: {
+      x: null,
+      y: null,
+      clickThrough: false,
+      scale: 0.5,
+      bubbleLevel: 'greet',
+      bubbleDndStart: '23:00',
+      bubbleDndEnd: '08:00',
+      bubbleIdleMin: 30,
+      layoutV2: true
+    },
     tools: {
       permissionMode: 'confirm',
       // 工具可见性：缺省 'all' = 与 P2 行为完全一致（全可见）
@@ -263,16 +273,33 @@ export function mergeAppConfig(raw: unknown): AppConfig {
           ? normalizePersonaName(persona.active)
           : DEFAULT_APP_CONFIG.persona.active
     },
-    pet: {
-      // 坐标非法（含 null）一律按"没有记忆"处理，由窗口侧回退右下角
-      x: typeof pet?.x === 'number' && Number.isFinite(pet.x) ? pet.x : null,
-      y: typeof pet?.y === 'number' && Number.isFinite(pet.y) ? pet.y : null,
-      clickThrough:
-        typeof pet?.clickThrough === 'boolean'
-          ? pet.clickThrough
-          : DEFAULT_APP_CONFIG.pet.clickThrough,
-      scale: num(pet?.scale, DEFAULT_APP_CONFIG.pet.scale)
-    },
+    pet: ((): AppConfig['pet'] => {
+      const scale = num(pet?.scale, DEFAULT_APP_CONFIG.pet.scale)
+      // 旧窗宽 260 → 新窗宽 400：立绘在窗内居中，为让立绘原地不动，
+      // 窗口左上向左挪 (400-260)/2*scale；只迁移一次（layoutV2 标记）。
+      let x = typeof pet?.x === 'number' && Number.isFinite(pet.x) ? pet.x : null
+      if (pet?.layoutV2 !== true && x !== null) {
+        x = x - Math.round(((400 - 260) / 2) * scale)
+      }
+      return {
+        x,
+        y: typeof pet?.y === 'number' && Number.isFinite(pet.y) ? pet.y : null,
+        clickThrough:
+          typeof pet?.clickThrough === 'boolean'
+            ? pet.clickThrough
+            : DEFAULT_APP_CONFIG.pet.clickThrough,
+        scale,
+        bubbleLevel:
+          pet?.bubbleLevel === 'off' || pet?.bubbleLevel === 'greet' || pet?.bubbleLevel === 'all'
+            ? pet.bubbleLevel
+            : DEFAULT_APP_CONFIG.pet.bubbleLevel,
+        bubbleDndStart: sanitizeClock(pet?.bubbleDndStart, DEFAULT_APP_CONFIG.pet.bubbleDndStart),
+        bubbleDndEnd: sanitizeClock(pet?.bubbleDndEnd, DEFAULT_APP_CONFIG.pet.bubbleDndEnd),
+        // 空闲分钟：0（关）或 5–240 整数，脏值回默认
+        bubbleIdleMin: sanitizeIdleMin(pet?.bubbleIdleMin),
+        layoutV2: true
+      }
+    })(),
     tools: {
       // 权限模式：非法值一律回退默认 'confirm'（默认请示，安全优先）
       permissionMode: sanitizePermissionMode(tools?.permissionMode),
@@ -389,6 +416,24 @@ function sanitizeBoundDir(raw: unknown): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+/** HH:MM 防御：只接受 00:00–23:59，其余回退调用方给的默认值 */
+function sanitizeClock(raw: unknown, fallback: string): string {
+  if (typeof raw !== 'string') return fallback
+  const m = raw.trim().match(/^(\d{2}):(\d{2})$/)
+  if (m === null) return fallback
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  return hh <= 23 && mm <= 59 ? raw.trim() : fallback
+}
+
+/** 气泡空闲分钟：0（关）或 5–240 整数；脏值回默认 */
+function sanitizeIdleMin(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_APP_CONFIG.pet.bubbleIdleMin
+  if (raw === 0) return 0
+  const n = Math.floor(raw)
+  return n >= 5 && n <= 240 ? n : DEFAULT_APP_CONFIG.pet.bubbleIdleMin
+}
+
 /**
  * MCP server 防御：
  * id/name/command 合法才保留；args/env 只收字符串；上限 10 个；
@@ -472,6 +517,29 @@ export function applySettingsPatch(current: AppConfig, patch: SettingsPatch): Ap
   if (p.persona !== undefined) {
     const active = typeof p.persona.active === 'string' ? p.persona.active.trim() : ''
     if (active !== '') next.persona.active = active
+  }
+
+  // 桌宠气泡设置（P9-T5）：位置/尺寸/穿透不在这里，只放行这四个字段
+  if (p.pet !== undefined) {
+    if (
+      p.pet.bubbleLevel === 'off' ||
+      p.pet.bubbleLevel === 'greet' ||
+      p.pet.bubbleLevel === 'all'
+    ) {
+      next.pet.bubbleLevel = p.pet.bubbleLevel
+    }
+    if (typeof p.pet.bubbleDndStart === 'string') {
+      const v = sanitizeClock(p.pet.bubbleDndStart, next.pet.bubbleDndStart)
+      next.pet.bubbleDndStart = v
+    }
+    if (typeof p.pet.bubbleDndEnd === 'string') {
+      const v = sanitizeClock(p.pet.bubbleDndEnd, next.pet.bubbleDndEnd)
+      next.pet.bubbleDndEnd = v
+    }
+    if (typeof p.pet.bubbleIdleMin === 'number' && Number.isFinite(p.pet.bubbleIdleMin)) {
+      const n = Math.floor(p.pet.bubbleIdleMin)
+      if (n === 0 || (n >= 5 && n <= 240)) next.pet.bubbleIdleMin = n
+    }
   }
 
   if (p.tools !== undefined && p.tools.permissionMode !== undefined) {

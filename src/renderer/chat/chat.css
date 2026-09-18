@@ -160,7 +160,10 @@
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* 曾经是 space-between（那时行里只有标题）；现在标题前可能多一个"在跑"加载环，
+     space-between 会把标题顶到最右，所以改成左对齐 + gap（单子项时两者表现一致） */
+  justify-content: flex-start;
+  gap: 6px;
   padding: 8px 11px;
   border-radius: var(--radius-base);
   color: var(--text-secondary);
@@ -186,6 +189,25 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 会话在生成中：标题前的转圈加载环（切到别的会话也看得见它还没跑完）。
+   轨道取弱线色、转动的弧取主题主色 —— 深浅两套 token 各自适配，不必为主题另写分支。 */
+.chat-session-spinner {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: chat-session-spin 0.7s linear infinite;
+}
+
+@keyframes chat-session-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chat-rename-input {
@@ -258,6 +280,8 @@
   cursor: pointer;
   padding: 4px;
   border-radius: var(--radius-sm);
+  /* 更新角标的定位基准 */
+  position: relative;
   transition:
     color 140ms ease,
     background 140ms ease;
@@ -266,6 +290,37 @@
 .chat-gear:hover {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* 更新角标（轻提示）：只提示、不自动下载；版本号与去处见该按钮的 title */
+.chat-gear-dot {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  /* 描边取面板色，深浅两主题下都能从齿轮笔画里"浮"出来 */
+  box-shadow: 0 0 0 2px var(--bg-panel);
+  animation: chat-gear-dot-pulse 1.8s ease-in-out infinite;
+}
+
+/* 已下载待安装：不再脉动（语义从"有新版"变成"重启即可装"，不该继续催） */
+.chat-gear-dot.is-ready {
+  animation: none;
+}
+
+@keyframes chat-gear-dot-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.6;
+  }
 }
 
 /* ===== 中央工作台（白色大圆角面板）===== */
@@ -1183,6 +1238,7 @@
 }
 
 .chat-input-box {
+  position: relative; /* 「优化」按钮绝对定位右上角的基准 */
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1193,6 +1249,64 @@
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease;
+}
+
+/* 提示词优化按钮（P9-T4）：平时安静地藏在右上角，hover 才醒目——
+   绝不能抢发送按钮的视线。绝对定位不占布局；textarea 右侧统一留白避让
+   （见 .chat-input 的 padding-right——不避让时第一行文字会被按钮压住，用户实测）。
+   紧凑化（11px 字 / 2px 7px 内距）是为了把避让宽度压到最小。 */
+.prompt-optimize-btn {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-base);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.prompt-optimize-btn:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.prompt-optimize-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* 可还原态：不用 hover 也给一点存在感（用户刚改写完，要能看到"退路"） */
+.prompt-optimize-btn.is-restore {
+  color: var(--text-secondary);
+  border-color: var(--line);
+}
+.prompt-optimize-btn.is-restore:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent-line);
+}
+/* 请求中转圈环（同会话加载环同款口径，只是更小）。
+   ★ T4 曾写 animation: spin —— 但 @keyframes spin 从未存在，圆圈根本不转（用户实测）。
+   这里直接复用会话加载环的 chat-session-spin，杜绝再引用不存在的 keyframes。 */
+.prompt-optimize-spin {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: chat-session-spin 0.7s linear infinite;
+}
+.prompt-optimize-icon {
+  flex: none;
 }
 
 .chat-input-box:focus-within {
@@ -1209,7 +1323,9 @@
   font-size: var(--font-size-base);
   letter-spacing: 0.3px;
   line-height: 1.6;
-  padding: 2px 0;
+  /* 右侧留白给「优化」按钮（绝对定位在右上角）：最宽态「优化中」按钮左缘
+     约 77px（right 14 + 按钮 ~63），84px 留白保证长文本首行不被压住 */
+  padding: 2px 84px 2px 0;
   outline: none;
   min-height: 46px;
 }
@@ -1713,15 +1829,6 @@
   font-weight: 700;
   /* 与滑条填充、下方选中 chip 同色（顶档由 .peak 规则覆盖为粉紫渐变） */
   color: var(--accent);
-}
-.rslider-cap-hint {
-  font-size: 10.5px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-.rslider-cap-hint::before {
-  content: '·';
-  margin: 0 7px;
 }
 /* 顶档：模型名与档名一并用粉→紫渐变填字（官方 Ultra 的紫罗兰仪式感，换我们的粉）。
    text-fill 显式打透才能让渐变在 -webkit 内核稳定生效 */
@@ -4572,6 +4679,24 @@ h6.rs-office-h {
   line-height: 1.6;
   color: var(--text-faint);
   word-break: break-word;
+}
+
+/* 系统通知（任务收尾的自动清理结果等）：居中一行淡色通报，不带头像、不进气泡。
+   它是"系统在说话"而不是她在说话，所以视觉上必须与对话气泡明确区分。 */
+.msg-notice {
+  /* 容器 .chat-messages 是普通块级流，靠 max-width + auto 外边距居中 */
+  max-width: min(86%, 560px);
+  margin: 0 auto 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-base);
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+  word-break: break-word;
+  animation: msg-in 180ms ease-out;
 }
 
 /* ── 任务清单侧轨──

@@ -1,6 +1,6 @@
 {
   "name": "aemeath-agent",
-  "version": "0.3.2-alpha",
+  "version": "0.3.3-alpha",
   "description": "Aemeath Agent —— 以《鸣潮》爱弥斯为主题的 Windows 桌面 AI 伴侣 Agent",
   "main": "./out/main/index.js",
   "private": true,

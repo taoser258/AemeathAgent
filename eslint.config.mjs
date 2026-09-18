@@ -36,5 +36,12 @@ export default defineConfig(
       ]
     }
   },
-  eslintConfigPrettier
+  eslintConfigPrettier,
+  // @electron-toolkit/eslint-config-ts 本意是给纯 JS 脚本关掉 explicit-function-return-type，
+  // 但它写的是 `files: ['*.js', '*.mjs']` —— 扁平配置里 `*` 不跨目录，scripts/ 下的 .mjs
+  // 仍被要求写返回类型（纯 JS 根本写不了 TS 注解）。这里补一条能覆盖子目录的同义豁免。
+  {
+    files: ['**/*.{js,mjs,cjs}'],
+    rules: { '@typescript-eslint/explicit-function-return-type': 'off' }
+  }
 )

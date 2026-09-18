@@ -4,12 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { ChatAttachmentPayload, ModelProfile, ReasoningEffort } from '@shared/types'
-import {
-  REASONING_LEVELS,
-  planReasoning,
-  reasoningDetail,
-  reasoningSummary
-} from '@shared/reasoning'
+import { REASONING_LEVELS, planReasoning, reasoningSummary } from '@shared/reasoning'
 import { resolveReasoningAdapter } from '@shared/reasoning-adapters'
 import { boundWorkspace, modeLabel, modeNeedsWorkspace } from '@shared/workspace'
 import { useChatStore, selectStreamingActive, type ChatMessage } from './store'
@@ -223,6 +218,9 @@ function ChatInput(): React.JSX.Element {
   const [usageOpen, setUsageOpen] = useState(false)
   /** 手动压缩（P8-T1）进行中（一次摘要调用，按秒计） */
   const [compacting, setCompacting] = useState(false)
+  /** 提示词优化（P9-T4）：请求中 / 可还原的原文快照（null = 当前文本就是用户自己写的） */
+  const [optimizing, setOptimizing] = useState(false)
+  const [optimizeSnapshot, setOptimizeSnapshot] = useState<string | null>(null)
   /** 右键模型弹出的「思考强度」菜单（P8-T4）：null = 未开 */
   const [reasoningMenu, setReasoningMenu] = useState<string | null>(null)
 
@@ -250,19 +248,6 @@ function ChatInput(): React.JSX.Element {
             : {})
         })
       : undefined
-
-  /** 档位 → 预算说明（与设置页/协议实现同源；只给 tokens 部分，档位名由滑条自己写） */
-  const menuHintOf = (level: ReasoningEffort): string => {
-    const plan = planReasoning({
-      protocol: menuProfile?.protocol ?? 'openai',
-      effort: level,
-      ...(menuAdapter !== undefined
-        ? { adapter: menuAdapter, model: menuProfile?.model ?? '' }
-        : {}),
-      ...(menuProfile?.maxOutput !== undefined ? { maxOutput: menuProfile.maxOutput } : {})
-    })
-    return reasoningDetail(plan)
-  }
 
   /** 写回档位：只影响**后续请求**（正在跑的那轮不回溯），乐观更新 + 读回同步 */
   const applyReasoning = async (level: ReasoningEffort): Promise<void> => {
@@ -332,6 +317,34 @@ function ChatInput(): React.JSX.Element {
     } finally {
       setCompacting(false)
     }
+  }
+
+  // ── 提示词优化（P9-T4）────────────────────────────────────────────
+  /** 把原文交给当前模型改写成更清楚的说法；成功后可一键还原，失败输入框不动 */
+  const doOptimize = async (): Promise<void> => {
+    if (text.trim() === '' || streaming || optimizing) return
+    setOptimizing(true)
+    try {
+      const res = await window.petAPI.promptOptimize(text, chatMode)
+      if (res.ok) {
+        // 只保留"第一次改写前"的原文：连续改写也能一步退到用户自己写的那句
+        setOptimizeSnapshot((cur) => cur ?? text)
+        setText(res.text)
+      } else {
+        flashNotice(res.error)
+      }
+    } catch {
+      flashNotice('优化失败（主进程未响应），请重试')
+    } finally {
+      setOptimizing(false)
+    }
+  }
+
+  /** 还原到用户自己写的原文（快照清掉，按钮收回） */
+  const restoreOptimized = (): void => {
+    if (optimizeSnapshot === null) return
+    setText(optimizeSnapshot)
+    setOptimizeSnapshot(null)
   }
 
   const pickFiles = async (): Promise<void> => {
@@ -506,6 +519,59 @@ function ChatInput(): React.JSX.Element {
             })}
           </div>
         )}
+        <button
+          type="button"
+          className={`prompt-optimize-btn${optimizeSnapshot !== null ? ' is-restore' : ''}`}
+          disabled={optimizing || (!optimizeSnapshot ? text.trim() === '' || streaming : false)}
+          title={
+            optimizeSnapshot !== null
+              ? '还原成你自己写的原文'
+              : '让 AI 把这句话改写得更清楚（不会自动发送）'
+          }
+          onClick={optimizeSnapshot !== null ? restoreOptimized : () => void doOptimize()}
+        >
+          {optimizing ? (
+            <span className="prompt-optimize-spin" aria-hidden="true" />
+          ) : optimizeSnapshot !== null ? (
+            <svg
+              className="prompt-optimize-icon"
+              width="11"
+              height="11"
+              viewBox="0 0 12 12"
+              aria-hidden="true"
+            >
+              <path
+                d="M10.5 6a4.5 4.5 0 1 1-1.32-3.18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+              <path
+                d="M10.7 1.1 9.4 3.1 7.2 2.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : (
+            <svg
+              className="prompt-optimize-icon"
+              width="11"
+              height="11"
+              viewBox="0 0 12 12"
+              aria-hidden="true"
+            >
+              <path
+                d="M6 1l1.2 3.8L11 6 7.2 7.2 6 11 4.8 7.2 1 6l3.8-1.2L6 1z"
+                fill="currentColor"
+              />
+            </svg>
+          )}
+          {optimizing ? '优化中' : optimizeSnapshot !== null ? '还原' : '优化'}
+        </button>
         <textarea
           className="chat-input"
           placeholder={
@@ -693,7 +759,6 @@ function ChatInput(): React.JSX.Element {
                         levels={menuLevels}
                         value={menuProfile?.reasoningEffort}
                         onChange={(level) => void applyReasoning(level)}
-                        hintOf={menuHintOf}
                         model={menuProfile?.model ?? ''}
                       />
                       <div className="reasoning-pop-note">

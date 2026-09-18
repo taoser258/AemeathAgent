@@ -1070,3 +1070,72 @@
   background: var(--accent);
   transition: width 220ms ease;
 }
+
+/* ── P9-T5 头顶气泡设置 ── */
+/* 行内控件较宽：第二列允许收缩，别把容器撑爆 */
+.settings-row-block {
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+}
+
+/* 分段选择器：胶囊托板 + 选中段浮起（对齐成熟产品 segmented control） */
+.bubble-level-pick {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  justify-self: end;
+}
+
+.bubble-level-opt {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.bubble-level-opt:hover:not(:disabled):not(.on) {
+  color: var(--text-strong);
+}
+
+.bubble-level-opt.on {
+  background: var(--bg-panel);
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.bubble-level-opt:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* 免打扰时段：两个 time 输入横排 */
+.dnd-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+
+.dnd-time {
+  width: 100px;
+  padding: 6px 8px;
+  font-family: inherit;
+}
+
+.dnd-dash {
+  color: var(--text-muted);
+}
+
+.dnd-select {
+  width: 110px;
+  justify-self: end;
+}

@@ -12,6 +12,8 @@ import { app, ipcMain, Menu, screen, BrowserWindow } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { APP_NAME } from '@shared/brand'
 import {
+  PET_BUBBLE,
+  WIN_OPEN_MAIN,
   WIN_PET_MOVE,
   WIN_PET_SCALE,
   WIN_SHOW_PET,
@@ -30,6 +32,16 @@ import {
 } from './pet-position'
 
 let petWindow: BrowserWindow | null = null
+
+/** 气泡页是否已加载完（未就绪时 webContents.send 会丢，见 createPetWindow 里的事件） */
+let petPageLoaded = false
+/** 桌宠窗是否已首次显示（启动阶段窗口尚未 show，不该把这时的气泡当"被隐藏"丢弃） */
+let petEverShown = false
+/** 未就绪期间待发的气泡：只留最新一条（过时的招呼不补） */
+let pendingBubble: string | null = null
+
+/** 软重启钩子：由 index.ts 注入（bubble-scheduler 的 restartBubbleCycle） */
+let softRestartHook: (() => void) | null = null
 
 /** 当前档位的窗口尺寸（createPetWindow / applyPetScale 维护；移动时用它钉回尺寸） */
 let petSize: WindowSize = petWindowSize(PET_SCALE_DEFAULT)
@@ -145,6 +157,10 @@ function restartApp(): void {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.reload()
     }
+    // 软重启语义上等于"重新打开应用"：重跑启动问候。
+    // 不补这一下，用户点了"重启应用"却看不到启动气泡（主进程没重启，
+    // startBubbleScheduler 的启动定时器不会重跑）——owner 实测困惑。
+    softRestartHook?.()
     return
   }
   app.relaunch()
@@ -203,7 +219,20 @@ export function createPetWindow(): BrowserWindow {
 
   // 恢复记忆的穿透状态（上次退出前若开着，启动即生效）
   pet.setIgnoreMouseEvents(config.pet.clickThrough)
-  pet.once('ready-to-show', () => pet.show())
+  pet.once('ready-to-show', () => {
+    pet.show()
+    petEverShown = true
+    flushPendingBubble()
+  })
+  // 气泡发送就绪信号：页面未加载完时 webContents.send 会丢（首屏加载慢于
+  // 启动问候的 4 秒延迟 = 气泡静默消失，实测坑）。reload 期间同样置为未就绪。
+  pet.webContents.on('did-start-loading', () => {
+    petPageLoaded = false
+  })
+  pet.webContents.on('did-finish-load', () => {
+    petPageLoaded = true
+    flushPendingBubble()
+  })
   // 位置记忆监听 'move' 而不是 'moved'：手动拖拽走程序化 setBounds，
   // Windows 上它不触发 'moved'；'move' 对两种来源都生效，高频由防抖消化
   pet.on('move', () => schedulePositionSave(pet))
@@ -214,6 +243,9 @@ export function createPetWindow(): BrowserWindow {
   })
   pet.on('closed', () => {
     petWindow = null
+    petPageLoaded = false
+    petEverShown = false
+    pendingBubble = null
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -235,12 +267,43 @@ export function showPetWindow(): void {
   }
 }
 
+/** 就绪后补发待发气泡（页面加载完 / 窗口首次显示两个时机都会尝试） */
+function flushPendingBubble(): void {
+  if (pendingBubble === null || !petPageLoaded || !petEverShown) return
+  const queued = pendingBubble
+  pendingBubble = null
+  sendPetBubble(queued)
+}
+
+/**
+ * 主动招呼（P9-T5）：向桌宠页推一条头顶气泡。
+ * 未就绪（页面还没加载完 / 窗口还没首次显示）→ 入队等就绪后补发；
+ * 用户主动隐藏中的桌宠不发（没有可见对象，也不该为冒泡把窗叫醒）。
+ */
+export function sendPetBubble(text: string): void {
+  if (petWindow === null || petWindow.isDestroyed()) return
+  if (!petPageLoaded || !petEverShown) {
+    pendingBubble = text
+    return
+  }
+  if (petWindow.isVisible()) {
+    petWindow.webContents.send(PET_BUBBLE, text)
+  }
+}
+
+/** 注入软重启钩子（index.ts 启动时调一次，见 restartApp 的注释） */
+export function setSoftRestartHook(fn: () => void): void {
+  softRestartHook = fn
+}
+
 /** 桌宠相关 IPC：右键菜单请求 + 手动拖拽移动 + 找回桌宠 + 穿透切换 */
 export function registerPetIpc(): void {
   ipcMain.on(WIN_SHOW_PET_MENU, () => popupPetMenu())
   ipcMain.on(WIN_SHOW_PET, () => {
     showPetWindow()
   })
+  // 点气泡 / 桌宠菜单 → 打开主窗（P9-T5：气泡是入口）
+  ipcMain.on(WIN_OPEN_MAIN, () => showMainWindow())
   ipcMain.on(WIN_PET_MOVE, (_event, x: unknown, y: unknown) => {
     if (!petWindow) return
     if (typeof x !== 'number' || !Number.isFinite(x)) return

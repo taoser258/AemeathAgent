@@ -17,13 +17,14 @@ const FIXTURES = join(__dirname, 'fixtures', 'personas')
 describe('agent/prompt · buildSystemPrompt 组装', () => {
   const persona = { soul: 'SOUL 部分', style: 'STYLE 部分' }
 
-  it('顺序固定：soul → style → 运行时附录，段间有分隔线', () => {
+  it('顺序固定：soul → style → 运行时附录 → 思考语言，段间有分隔线', () => {
     const prompt = buildSystemPrompt(persona, { now: new Date('2026-09-06T18:00:00') })
     const segments = prompt.split(PROMPT_SEPARATOR)
-    expect(segments).toHaveLength(3)
+    expect(segments).toHaveLength(4)
     expect(segments[0]).toBe('SOUL 部分')
     expect(segments[1]).toBe('STYLE 部分')
     expect(segments[2]).toContain('# 运行时附录')
+    expect(segments[3]).toContain('# 思考语言（硬性要求）')
   })
 
   it('附录包含注入的当前时间（中文长日期 + 时分）', () => {
@@ -53,7 +54,7 @@ describe('agent/prompt · buildSystemPrompt 组装', () => {
     const persona = { soul: '# 灵魂', style: '# 风格' }
     const plain = buildSystemPrompt(persona, {})
     expect(plain).toContain('事实分级')
-    expect(plain.split(PROMPT_SEPARATOR)).toHaveLength(3) // 段数不变（加在运行时附录内部）
+    expect(plain.split(PROMPT_SEPARATOR)).toHaveLength(4) // 段数 +1（思考语言独立成段）
   })
 
   it('技能清单：有技能时附录列 name+description 并引导 skill_use；无则不提', () => {
@@ -111,7 +112,7 @@ describe('学习模式辅导守则', () => {
     const learn = buildSystemPrompt(persona, { learnMode: true })
     expect(plain).not.toContain('学习模式辅导守则')
     expect(learn).toContain('学习模式辅导守则')
-    expect(learn.split(PROMPT_SEPARATOR)).toHaveLength(4) // soul → style → 运行时 → 学习守则
+    expect(learn.split(PROMPT_SEPARATOR)).toHaveLength(5) // soul → style → 运行时 → 学习守则 → 思考语言
   })
 })
 
@@ -130,11 +131,11 @@ describe('计划模式守则', () => {
     const plan = buildSystemPrompt(persona, { planMode: true })
     expect(plain).not.toContain('计划模式守则')
     expect(plan).toContain('计划模式守则')
-    expect(plan.split(PROMPT_SEPARATOR)).toHaveLength(4) // soul → style → 运行时 → 计划守则
+    expect(plan.split(PROMPT_SEPARATOR)).toHaveLength(5) // soul → style → 运行时 → 计划守则 → 思考语言
     const both = buildSystemPrompt(persona, { learnMode: true, planMode: true })
     expect(both).toContain('学习模式辅导守则')
     expect(both).toContain('计划模式守则')
-    expect(both.split(PROMPT_SEPARATOR)).toHaveLength(5)
+    expect(both.split(PROMPT_SEPARATOR)).toHaveLength(6)
   })
 })
 
@@ -192,14 +193,30 @@ describe('开工方式守则', () => {
     const withTools = buildSystemPrompt(persona, { toolMode: true })
     expect(plain).not.toContain('开工方式')
     expect(withTools).toContain('开工方式')
-    expect(withTools.split(PROMPT_SEPARATOR)).toHaveLength(4) // soul → style → 运行时 → 开工方式
+    expect(withTools.split(PROMPT_SEPARATOR)).toHaveLength(5) // soul → style → 运行时 → 开工方式 → 思考语言
   })
 
   it('与学习守则叠加：学习模式（有工具）同时拿到开工方式与辅导守则', () => {
     const both = buildSystemPrompt(persona, { toolMode: true, learnMode: true })
     expect(both).toContain('开工方式')
     expect(both).toContain('学习模式辅导守则')
-    expect(both.split(PROMPT_SEPARATOR)).toHaveLength(5)
+    expect(both.split(PROMPT_SEPARATOR)).toHaveLength(6) // soul → style → 运行时 → 开工 → 学习守则 → 思考语言
+  })
+
+  it('★ 思考语言段恒为最后一段（模式守则之后）——近因效应才成立', () => {
+    // 2026-09-17 修正：这段话此前写在运行时附录末尾，而 work/learn 还要在其后追加
+    // 「开工方式 / 学习守则」长文 → 模型最后读到的不是它，实测思考大面积跑英文。
+    for (const ctx of [
+      {},
+      { toolMode: true },
+      { learnMode: true },
+      { toolMode: true, learnMode: true, planMode: true }
+    ]) {
+      const prompt = buildSystemPrompt(persona, ctx)
+      const last = prompt.split(PROMPT_SEPARATOR).at(-1) ?? ''
+      expect(last).toContain('# 思考语言（硬性要求）')
+      expect(last).toContain('必须从第一个字起就用中文书写')
+    }
   })
 
   it('技能段改为"先过清单、倾向加载"', () => {

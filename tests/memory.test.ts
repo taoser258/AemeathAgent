@@ -176,9 +176,9 @@ describe('memory-store（IO：整写 + 快照）', () => {
   })
 
   it('add → read 往返；文件确实落盘', () => {
-    expect(addEntry({ kind: 'fact', content: '用户在云澜大学', keywords: ['云澜大学'] }, 's1')).toBe(
-      'added'
-    )
+    expect(
+      addEntry({ kind: 'fact', content: '用户在云澜大学', keywords: ['云澜大学'] }, 's1')
+    ).toBe('added')
     expect(readEntries()).toHaveLength(1)
     expect(existsSync(join(dir, 'entries.json'))).toBe(true)
   })
@@ -186,7 +186,10 @@ describe('memory-store（IO：整写 + 快照）', () => {
   it('重复合并：第二次同关键词 → updated 且仍 1 条', () => {
     addEntry({ kind: 'fact', content: '用户在云澜大学', keywords: ['云澜大学', '学生'] }, 's1')
     expect(
-      addEntry({ kind: 'fact', content: '用户在云澜大学读书', keywords: ['云澜大学', '学生'] }, 's2')
+      addEntry(
+        { kind: 'fact', content: '用户在云澜大学读书', keywords: ['云澜大学', '学生'] },
+        's2'
+      )
     ).toBe('updated')
     expect(readEntries()).toHaveLength(1)
   })

@@ -103,6 +103,20 @@ export interface AppConfig {
     y: number | null
     clickThrough: boolean
     scale: number
+    /**
+     * 头顶气泡三档（P9-T5）：
+     * · off   全关；
+     * · greet 只打招呼（启动/时段/点击/拖动/主窗收起，都是回应型）；
+     * · all   连主动提醒也开（空闲问候、任务完成/失败）。
+     */
+    bubbleLevel: 'off' | 'greet' | 'all'
+    /** 免打扰时段起止，HH:MM（start>end=跨午夜；相同=不启用）；默认 23:00–08:00 */
+    bubbleDndStart: string
+    bubbleDndEnd: string
+    /** 空闲多少分钟后冒泡；0=关；范围 5–240，默认 30（仅 all 档生效） */
+    bubbleIdleMin: number
+    /** 内部迁移标记：宽窗布局（260→400）一次性位置校正已做 */
+    layoutV2: boolean
   }
   tools: {
     /**
@@ -322,10 +336,17 @@ export interface ChatAttachmentPayload {
   path?: string
 }
 
-/** SETTINGS_SET 的局部更新载荷：只允许改 model / persona；pet 走 win:* 通道 */
+/** SETTINGS_SET 的局部更新载荷。pet 只放行气泡设置（位置/尺寸/穿透仍走 win:* 通道） */
 export interface SettingsPatch {
   model?: Partial<AppConfig['model']>
   persona?: Partial<AppConfig['persona']>
+  /** 桌宠气泡设置（P9-T5）：只接受这四个字段 */
+  pet?: {
+    bubbleLevel?: AppConfig['pet']['bubbleLevel']
+    bubbleDndStart?: string
+    bubbleDndEnd?: string
+    bubbleIdleMin?: number
+  }
   /** 工具白名单：整体替换 allowedRoots */
   tools?: Partial<AppConfig['tools']>
   /** MCP 服务器列表：整表替换 */
@@ -366,7 +387,11 @@ export interface ChatSendResult {
  */
 export interface PersistedMessage {
   id: string
-  role: 'user' | 'assistant' | 'tool'
+  /**
+   * notice = 系统通知（任务收尾的清理结果这类事实通报）：落盘以便回看，
+   * 但**不进 LLM 上下文**（见 history.ts 的 projectPersistedHistory）。
+   */
+  role: 'user' | 'assistant' | 'tool' | 'notice'
   ts: number
   text: string
   attachments?: ChatAttachmentPayload[]

@@ -228,6 +228,15 @@ function MessageBubble({
 }): React.JSX.Element {
   // 文件卡片点击 → 开右侧栏预览（store 是唯一入口，文件树/卡片/开关共用）
   const openRightFile = useChatStore((s) => s.openRightFile)
+  // 系统通知（任务收尾的自动清理结果等）：不带头像、不进气泡，居中一行淡色通报。
+  // 落盘进会话档案，但绝不进 LLM 上下文（见 history.ts）。
+  if (message.role === 'notice') {
+    return (
+      <div className="msg-notice" role="status">
+        {message.content}
+      </div>
+    )
+  }
   if (message.role === 'user') {
     const atts = message.attachments ?? []
     const stickers = atts.filter((a) => a.kind === 'sticker')

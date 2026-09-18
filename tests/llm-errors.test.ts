@@ -39,8 +39,12 @@ describe('llm/errors · classifyLlmError', () => {
   })
 
   it('审核形态变体（sensitive / prohibited）同样归 content；普通 400 仍是 unknown', () => {
-    expect(classifyLlmError({ status: 400, message: 'your input contains sensitive information' }).kind).toBe('content')
-    expect(classifyLlmError({ status: 400, message: 'response prohibited by policy' }).kind).toBe('content')
+    expect(
+      classifyLlmError({ status: 400, message: 'your input contains sensitive information' }).kind
+    ).toBe('content')
+    expect(classifyLlmError({ status: 400, message: 'response prohibited by policy' }).kind).toBe(
+      'content'
+    )
     expect(classifyLlmError({ status: 400, message: 'max_tokens too large' }).kind).toBe('unknown')
   })
 

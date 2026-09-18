@@ -8,7 +8,13 @@ import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { markAppQuitting } from './windows/app-quit'
 import { createMainWindow, registerMainWindowIpc, showMainWindow } from './windows/main-window'
-import { createPetWindow, registerPetIpc, showPetWindow } from './windows/pet'
+import {
+  createPetWindow,
+  registerPetIpc,
+  sendPetBubble,
+  setSoftRestartHook,
+  showPetWindow
+} from './windows/pet'
 import { createTray, notifyHiddenToTray } from './windows/tray'
 import { installMcpEnvResolver, registerSettingsIpc } from './settings/settings-ipc'
 import { registerChatIpc } from './chat/run'
@@ -16,6 +22,13 @@ import { registerSessionsIpc } from './sessions/registry'
 import { registerWorkspaceIpc } from './workspace/workspace-ipc'
 import { registerTerminalIpc, shutdownTerminal } from './workspace/terminal-ipc'
 import { registerUpdaterIpc, scheduleStartupUpdateCheck } from './updater/updater'
+import { registerPromptOptimizeIpc } from './llm/prompt-optimize-ipc'
+import {
+  attachMainWindowHooks,
+  restartBubbleCycle,
+  setBubbleSender,
+  startBubbleScheduler
+} from './pet/bubble-scheduler'
 import { registerBrowserIpc } from './browser/browser-ipc'
 import { setMemoryBase } from './memory/memory-store'
 import { registerMemoryIpc } from './memory/memory-ipc'
@@ -99,6 +112,7 @@ if (!app.requestSingleInstanceLock()) {
     registerStickerSupport()
     registerFilePickIpc()
     registerUpdaterIpc()
+    registerPromptOptimizeIpc()
     scheduleStartupUpdateCheck() // 打包态：启动 8s 后静默检查一次（失败不打扰）
     // 文件工具相对路径的解析基准 = 应用所在目录（dev 即项目根；验收实测缺陷修复）
     setToolPathBase(app.getAppPath())
@@ -181,6 +195,11 @@ if (!app.requestSingleInstanceLock()) {
     }
     const main = createMainWindow()
     createPetWindow()
+    // P9-T5：气泡出口注入 + 软重启钩子 + 主窗挂钩 + 主动招呼调度
+    setBubbleSender(sendPetBubble)
+    setSoftRestartHook(restartBubbleCycle)
+    attachMainWindowHooks(main)
+    startBubbleScheduler()
     createTray()
     // 关窗 = 最小化到托盘：首次隐藏时气泡提示一次（程序仍在运行、去哪找回）
     main.on('hide', () => notifyHiddenToTray())

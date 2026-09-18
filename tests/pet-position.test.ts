@@ -33,17 +33,18 @@ describe('windows/pet-position', () => {
 })
 
 describe('windows/petWindowSize', () => {
+  // P9-T5 起窗宽 400（立绘 260 居中 + 两侧透明区），高度不变
   it('默认 0.5x 返回最小档尺寸', () => {
-    expect(petWindowSize(0.5)).toEqual({ width: 130, height: 158 })
+    expect(petWindowSize(0.5)).toEqual({ width: 200, height: 158 })
   })
 
   it('1x 返回基础尺寸；1.5x 按倍率取整', () => {
-    expect(petWindowSize(1)).toEqual({ width: 260, height: 316 })
-    expect(petWindowSize(1.5)).toEqual({ width: 390, height: 474 })
+    expect(petWindowSize(1)).toEqual({ width: 400, height: 316 })
+    expect(petWindowSize(1.5)).toEqual({ width: 600, height: 474 })
   })
 
   it('倍率钳制在 0.5–1.5（越界值夹到上下限）', () => {
-    expect(petWindowSize(0)).toEqual({ width: 130, height: 158 })
-    expect(petWindowSize(7)).toEqual({ width: 390, height: 474 })
+    expect(petWindowSize(0)).toEqual({ width: 200, height: 158 })
+    expect(petWindowSize(7)).toEqual({ width: 600, height: 474 })
   })
 })

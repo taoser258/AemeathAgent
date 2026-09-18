@@ -1,4 +1,4 @@
-﻿// 聊天管线：chat:send → 组 system prompt → LLM 流式 → chat:stream 逐 token 推送。
+// 聊天管线：chat:send → 组 system prompt → LLM 流式 → chat:stream 逐 token 推送。
 // 契约：渲染层 chatSend(sessionId, text, attachments)；主进程生成 runId；
 // 中断 chat:cancel(runId)；done/error 后该 runId 关闭。
 // 会话历史 T5 起持久化（main/sessions/session-store.ts，每会话一个 JSON 原子写）；
@@ -49,6 +49,7 @@ import type {
   TokenUsage
 } from '@shared/types'
 import { checkpointDir, configDir, logsDir, personasDir, sessionsDir } from '../paths'
+import { notifyBubble } from '../pet/bubble-scheduler'
 import { clearCheckpointMarker, readCheckpointMarker, saveCheckpointMarker } from '../checkpoint'
 import { readAppConfig } from '../settings/app-config'
 import { readProfileKey } from '../llm/secrets'
@@ -70,7 +71,8 @@ import {
   resolveToolPath
 } from '../agent/tools/registry'
 import { trashToRecycleBin } from '../agent/tools/trash'
-import { planTempCleanup } from '../agent/tools/temp-cleanup'
+import { planTempCleanup, type LeftoverReason } from '../agent/tools/temp-cleanup'
+import { findClaimedButMissing } from './claimed-files'
 import { getSubLlmTools, handleSpawnTool } from '../agent/spawn'
 import { handleAskTool } from './ask'
 import { writeAgentLog } from '../agent/agent-log'
@@ -558,6 +560,8 @@ export function registerChatIpc(): void {
           // 记忆开关透传：关闭时附录写明"没有记住的能力"，
           // 与"工具已从注册表移除"两处一致，免得她嘴上说"记住了"
           memoryEnabled: config.privacy.memory === true,
+          // 桌宠气泡档位：让模型对自身形态的认知与 UI 一致（P9-T5）
+          bubbleLevel: config.pet.bubbleLevel,
           // 长期记忆注入：开关开启时按本轮用户消息做关键词检索，top-8 注入
           // 并累加 hits；检索/读写任何失败都静默（记忆是锦上添花，绝不阻塞对话）
           memories: (() => {
@@ -1477,10 +1481,48 @@ export function registerChatIpc(): void {
         // 中间产物清理（owner 需求）：只在正常完成、有工具的模式下执行。
         // ★ **删除依据只有"她的显式登记"**（mark_temp_files）——不再猜后缀、更不猜目录名：
         //   两次误删事故（temp 目录里的成果 md、用户要求保留的 旧日志.log）都源于猜测。
-        //   planTempCleanup 再过 7 道闸门（登记/后缀/本轮新建/工作区内/用户没提过/数量/正常收尾），
+        //   planTempCleanup 再过 7 道闸门（登记/不像成果/本轮新建/工作区内/用户没提过/数量/正常收尾），
         //   删除走回收站——即使全错也能还原。任何意外静默，不影响任务结果。
         if (loopResult.stoppedReason === 'completed' && chatMode !== 'chat') {
           try {
+            /**
+             * 清理结果既推事件、也落盘成一条 notice 消息。
+             * 此前只有流式期的临时提示（run_notice 只进内存），刷新/重进会话就消失——
+             * 用户看到"她说过要清却没清"时连痕迹都查不到（2026-09-17 实测反馈）。
+             * notice 是给用户看的系统通报，projectPersistedHistory 会跳过它，不进 LLM 上下文。
+             */
+            const emitCleanupNotice = (
+              text: string,
+              kind: RunNoticeData['kind'] = 'cleanup'
+            ): void => {
+              const messageId = newPersistedId()
+              persistTurns(sessionId, [{ id: messageId, role: 'notice', ts: Date.now(), text }])
+              emit(sender, {
+                sessionId,
+                runId,
+                type: 'run_notice',
+                data: { kind, attempt: 0, text, messageId } satisfies RunNoticeData
+              })
+            }
+            // 收尾核对：她声称写好的文件是否真的在工作区里（keepme.log 凭空宣称的教训）。
+            // **必须在清理之前核对**——登记的中间产物此刻还在，清完再核会误报"找不到"。
+            try {
+              const todos = readTodos(sessionId)
+              const missing = findClaimedButMissing({
+                answerText: loopResult.finalText,
+                todos: todos?.items ?? [],
+                workspace: sessionWorkspace,
+                exists: (p) => existsSync(p)
+              })
+              if (missing.length > 0) {
+                emitCleanupNotice(
+                  `核对提醒：${missing.map((p) => basename(p)).join('、')} 我这边没在工作区里找到——可能没写成功或已被移走，请你核对一下。`,
+                  'verify'
+                )
+              }
+            } catch {
+              // 核对是锦上添花：任何意外都静默
+            }
             const plan = planTempCleanup({
               declared: [...declaredTempFiles],
               created: [...createdFiles],
@@ -1495,16 +1537,9 @@ export function registerChatIpc(): void {
               }
             })
             if (plan.skippedTooMany > 0) {
-              emit(sender, {
-                sessionId,
-                runId,
-                type: 'run_notice',
-                data: {
-                  kind: 'cleanup',
-                  attempt: 0,
-                  text: `任务结束：登记的中间产物有 ${plan.skippedTooMany} 个，数量偏多没敢自动清理（防误判），都原样保留；确认要清的话告诉我，我逐个删。`
-                } satisfies RunNoticeData
-              })
+              emitCleanupNotice(
+                `任务结束：登记的中间产物有 ${plan.skippedTooMany} 个，数量偏多没敢自动清理（防误判），都原样保留；确认要清的话告诉我，我逐个删。`
+              )
             } else if (plan.files.length > 0 || plan.leftovers.length > 0) {
               const cleaned: string[] = []
               for (const p of plan.files) {
@@ -1525,20 +1560,24 @@ export function registerChatIpc(): void {
                 )
               }
               if (plan.leftovers.length > 0) {
-                parts.push(
-                  `${plan.leftovers.map((p) => basename(p)).join('、')} 未自动清理（你提到过或不像中间件），已原样保留`
-                )
+                // 如实说清"为什么这个还在"——含糊的"未自动清理"会让用户以为清理坏了
+                // （2026-09-17 真实反馈：登记了却留在工作区，用户只能自己猜原因）
+                const WHY: Record<LeftoverReason, string> = {
+                  deliverable: '像是成果类型的文件，没敢动',
+                  kept: '你在消息里说要保留它',
+                  outside: '在工作区之外'
+                }
+                const byReason = new Map<LeftoverReason, string[]>()
+                for (const item of plan.leftovers) {
+                  const names = byReason.get(item.reason) ?? []
+                  names.push(basename(item.path))
+                  byReason.set(item.reason, names)
+                }
+                for (const [reason, names] of byReason) {
+                  parts.push(`${names.join('、')} 原样保留（${WHY[reason]}）`)
+                }
               }
-              emit(sender, {
-                sessionId,
-                runId,
-                type: 'run_notice',
-                data: {
-                  kind: 'cleanup',
-                  attempt: 0,
-                  text: `任务结束，${parts.join('；')}。`
-                } satisfies RunNoticeData
-              })
+              emitCleanupNotice(`任务结束，${parts.join('；')}。`)
             }
           } catch {
             // 清理是锦上添花：任何意外都静默，不打扰已完成的任务
@@ -1567,6 +1606,10 @@ export function registerChatIpc(): void {
               ? { note, usage: loopResult.usage, stats: nextStats, persisted: false }
               : { note, usage: loopResult.usage, stats: nextStats }
         })
+        // 桌宠冒泡：真跑过工具步且正常走完才算"任务完成"（闲聊/max-steps 不算）
+        if (loopResult.steps > 0 && loopResult.stoppedReason === 'completed') {
+          void notifyBubble('task_done')
+        }
       } catch (err) {
         if (controller.signal.aborted) {
           // 用户主动停止：步边界已落盘；尾部部分文本（最后一个未完轮次）一并保留
@@ -1652,6 +1695,8 @@ export function registerChatIpc(): void {
           }
           emit(sender, { sessionId, runId, type: 'error', data: info.message })
           emit(sender, { sessionId, runId, type: 'stats', data: nextStats })
+          // 桌宠冒泡：任务跑到一半失败才提醒（闲聊第一句就报错不算）
+          if (live.steps > 0) void notifyBubble('task_fail')
         }
       } finally {
         nudgesBySession.delete(sessionId)

@@ -94,6 +94,9 @@ export function visionFailureNote(imageName: string, reason: string): string {
 export function projectPersistedHistory(messages: PersistedMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = []
   for (const msg of messages) {
+    // 系统通知（清理结果这类事实通报）只给用户看，绝不进 LLM 上下文：
+    // 它是"系统在对用户说话"，塞进对话会污染历史、还可能被模型当成自己说过的话
+    if (msg.role === 'notice') continue
     if (msg.role === 'tool') {
       if (msg.toolCallId) {
         turns.push({ role: 'tool', tool_call_id: msg.toolCallId, content: msg.text })

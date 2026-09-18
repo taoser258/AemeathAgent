@@ -131,6 +131,10 @@ export const MCP_BUILTIN_RESTORE = 'mcp:builtin-restore'
 
 /** 桌宠：主 → pet 渲染层，更新头顶气泡文本 */
 export const PET_BUBBLE = 'pet:bubble'
+/** 桌宠：pet 渲染层 → 主，被点了一下（按下抬起几乎没动） */
+export const PET_TAP = 'pet:tap'
+/** 桌宠：pet 渲染层 → 主，一次拖拽结束（移动过） */
+export const PET_DRAGGED = 'pet:dragged'
 
 /** 窗口：渲染 → 主，桌宠页右键时请求弹出菜单（打开主窗 / 切穿透 / 退出） */
 export const WIN_SHOW_PET_MENU = 'win:show-pet-menu'
@@ -167,7 +171,12 @@ export const WIN_OPEN_MAIN = 'win:open-main'
 
 /** 自动更新：检查 / 下载 / 重启安装 / 打开 Releases + 状态广播 */
 export const UPDATE_CHECK = 'update:check'
+/** 自动更新：只读当前状态（渲染层挂载时对账，**不触发网络检查**——每次开窗都真查会白耗流量与时间） */
+export const UPDATE_STATUS_GET = 'update:status-get'
 export const UPDATE_DOWNLOAD = 'update:download'
 export const UPDATE_QUIT_INSTALL = 'update:quit-install'
 export const UPDATE_OPEN_RELEASES = 'update:open-releases'
 export const UPDATE_STATUS = 'update:status'
+
+/** 提示词优化（P9-T4）：渲染 → 主，把输入框当前原文改写成更清楚的版本（非流式、不自动发送） */
+export const PROMPT_OPTIMIZE = 'prompt:optimize'
