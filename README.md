@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/license-PolyForm--Noncommercial-yellow" alt="License">
   <img src="https://img.shields.io/badge/MCP-client-orange" alt="MCP">
-  <img src="https://img.shields.io/badge/tests-932%20passing-brightgreen" alt="测试">
+  <img src="https://img.shields.io/badge/tests-979%20passing-brightgreen" alt="测试">
 </p>
 
 以《鸣潮》角色 **爱弥斯** 为主题的 Windows 桌面 AI 伴侣：一个常驻桌宠小窗（透明 / 置顶 / 可拖拽）+ 一个主窗（聊天 / 工作 / 学习）。核心是一套自研的 agent 引擎——工具调用、权限审批、可恢复执行、记忆与检索、学习闭环，桌宠是它的"脸"，聊天只是最初的能力。
@@ -15,7 +15,7 @@
 | --- | --- |
 | ![主窗聊天](assets/screenshots/chat.png) | ![桌宠](assets/screenshots/pet.png) |
 
-> 当前版本 **v0.3.2-alpha**（内测阶段）。到 [Releases](https://github.com/taoser258/AemeathAgent/releases) 下载 Windows 安装包，或按下方步骤从源码运行。
+> 当前版本 **v0.3.3-alpha**（内测阶段）。到 [Releases](https://github.com/taoser258/AemeathAgent/releases) 下载 Windows 安装包，或按下方步骤从源码运行。
 
 ## 快速开始
 
@@ -44,7 +44,7 @@ npm run dev         # 启动：桌宠出现在右下角，主窗自动打开
 
 ```bash
 npm run dev           # 开发模式（渲染层 HMR；改主进程代码需重启一次）
-npm test              # vitest 单测（纯逻辑，932 例）
+npm test              # vitest 单测（纯逻辑，979 例）
 npm run typecheck     # 主进程 + 渲染进程类型检查
 npm run lint          # ESLint
 npm run format        # Prettier
@@ -56,8 +56,9 @@ npm run dist          # 打 NSIS 安装包（产物目录见 package.json build.
 
 ### 对话与桌宠
 
-- **桌宠窗**：透明 / 置顶 / 拖拽 / 点击穿透可切 / 位置记忆 / 尺寸滑动调节（50%–150%）/ 右键菜单。
-- **聊天**：流式输出可中断；Markdown + 代码高亮 + 数学公式；图片、文本、Word / Excel / PPT 附件、**PDF 直读正文（可按页读取，扫描件会如实提示）**；表情包面板。侧栏会话列表在生成中会显示转圈标识（按会话判定，多会话并行也看得清）。
+- **桌宠窗**：透明 / 置顶 / 拖拽 / 点击穿透可切 / 位置记忆 / 尺寸滑动调节（50%–150%）/ 右键菜单；形象层带呼吸微动。
+- **桌宠气泡**：主动冒泡（启动问候 / 时段招呼 / 任务完成提醒）与回应式冒泡（戳她 / 拖她 / 收起主窗），带冷却与频率约束、23:00–08:00 免打扰、全屏时不打扰；设置页三档可选（只问候 / 问候+任务提醒 / 完全关闭）。
+- **聊天**：流式输出可中断；Markdown + 代码高亮 + 数学公式；图片、文本、Word / Excel / PPT 附件、**PDF 直读正文（可按页读取，扫描件会如实提示）**；表情包面板。侧栏会话列表在生成中会显示转圈标识（按会话判定，多会话并行也看得清）。输入框「**提示词优化**」按钮可就地改写当前输入（不自动发送，可一键还原）。
 - **三种模式**：💬 对话 / 🧰 工作 / 📚 学习，会话各自独立、侧栏按模式过滤、开场白各写各的；自动标题、置顶、重命名、重启完整恢复。
 - **实时监测条**：轮数 · 步数 · 工具耗时 · LLM 耗时 · 首 token 延迟 · tok/s · 缓存命中 · 输入/输出 token（三协议口径统一，带缓存端点的数字也如实）。
 
@@ -113,7 +114,7 @@ AemeathAgent/
 │   ├── preload/               # contextBridge 白名单（window.petAPI）
 │   ├── renderer/              # 桌宠页 / 聊天页（含 genui）/ 设置页 / 全局样式
 │   └── shared/                # IPC 通道常量 + 流式协议 + 品牌/版本单一来源
-├── tests/                     # vitest（只测纯逻辑；932 例）
+├── tests/                     # vitest（只测纯逻辑；979 例）
 ├── scripts/                   # Office 运行时构建 + 发布库源码同步（sync-public.mjs）
 └── build/                     # 打包资源（icon.ico）；release*/ 为打包产物（git 忽略）
 ```
